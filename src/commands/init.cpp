@@ -13,14 +13,22 @@ void init()
         std::cout << "A repository already exists!" << std::endl;
         return;
     }
-    
-    fs::create_directories(".mgit/objects");
-    fs::create_directories(".mgit/refs/heads");
-    fs::create_directories(".mgit/refs/tags");
-    fs::create_directories(".mgit/refs/remotes");
-    fs::create_directories(".mgit/hooks");
-    fs::create_directories(".mgit/logs");
-    fs::create_directories(".mgit/info");
 
-    std::cout << "Initialized an empty repository" << std::endl;
+    // Try creating the .mgit directory and its subdirectories
+    try {
+        fs::create_directory(".mgit");
+        fs::create_directories(".mgit/objects");
+        fs::create_directories(".mgit/refs/heads");
+        fs::create_directories(".mgit/refs/tags");
+        fs::create_directories(".mgit/refs/remotes");
+        fs::create_directories(".mgit/hooks");
+        fs::create_directories(".mgit/logs");
+        fs::create_directories(".mgit/info");
+        
+        std::cout << "Initialized an empty repository" << std::endl;
+        
+    } catch (const std::exception &e) {
+        std::cerr << "Error initializing repository: " << e.what() << std::endl;
+        return;
+    }
 }
