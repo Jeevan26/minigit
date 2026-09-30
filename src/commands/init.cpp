@@ -1,7 +1,7 @@
-#include "init.hpp"
-
 #include <filesystem>
 #include <iostream>
+
+#include "init.hpp"
 
 namespace fs = std::filesystem;
 
