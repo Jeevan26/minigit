@@ -16,22 +16,17 @@ int main(int argc, char *argv[])
 
     std::string command = argv[1];
 
-    if (command == "init")
-        init();
+    if (command == "init"){
+        return init();
+    }
     else if (command == "add")
     {
-        if (argc < 3)
-        {
-            std::cerr << "Please provide a path to add" << std::endl;
-            return 1;
-        }
-        return add(argv[2]) ? 0 : 1;
+        std::string object = argv[2] ? argv[2] : "";
+        return add(object);
     }
     else
     {
         std::cerr << "Invalid command" << std::endl;
         return 1;
     }
-
-    return 0;
 }

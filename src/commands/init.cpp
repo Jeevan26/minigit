@@ -1,21 +1,23 @@
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 
 #include "init.hpp"
 
 namespace fs = std::filesystem;
 
-void init()
+int init()
 {
 
     if (fs::is_directory("./.mgit"))
     {
         std::cout << "A repository already exists!" << std::endl;
-        return;
+        return 0;
     }
 
     // Try creating the .mgit directory and its subdirectories
-    try {
+    try
+    {
         fs::create_directory(".mgit");
         fs::create_directories(".mgit/objects");
         fs::create_directories(".mgit/refs/heads");
@@ -24,11 +26,18 @@ void init()
         fs::create_directories(".mgit/hooks");
         fs::create_directories(".mgit/logs");
         fs::create_directories(".mgit/info");
+
+        //Create an index file
+        fs::path file_path = ".mgit/index";
+        std::ofstream file(file_path);
+        file.close();
         
         std::cout << "Initialized an empty repository" << std::endl;
-        
-    } catch (const std::exception &e) {
+        return 0;
+    }
+    catch (const std::exception &e)
+    {
         std::cerr << "Error initializing repository: " << e.what() << std::endl;
-        return;
+        return 1;
     }
 }
