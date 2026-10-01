@@ -20,11 +20,18 @@ int main(int argc, char *argv[])
         init();
     else if (command == "add")
     {
-        std::string path = argv[2] ? argv[2] : "";
-        add(path);
+        if (argc < 3)
+        {
+            std::cerr << "Please provide a path to add" << std::endl;
+            return 1;
+        }
+        return add(argv[2]) ? 0 : 1;
     }
     else
+    {
         std::cerr << "Invalid command" << std::endl;
+        return 1;
+    }
 
     return 0;
 }

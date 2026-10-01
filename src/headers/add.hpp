@@ -1,3 +1,5 @@
 #pragma once
 
-void add(std::string object);
+#include <string>
+
+bool add(const std::string &object);
