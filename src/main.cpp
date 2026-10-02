@@ -6,6 +6,8 @@
 #include "headers/init.hpp"
 #include "headers/add.hpp"
 
+#include "headers/destory.hpp"
+
 int main(int argc, char *argv[])
 {
     if (argc < 2)
@@ -23,6 +25,9 @@ int main(int argc, char *argv[])
     {
         std::string object = argv[2] ? argv[2] : "";
         return add(object);
+    }
+    else if(command == "destroy"){
+        return destroy();
     }
     else
     {
