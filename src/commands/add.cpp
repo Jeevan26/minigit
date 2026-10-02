@@ -160,7 +160,7 @@ namespace
         const auto existing_entry = entries.find(index_key);
         if (existing_entry != entries.end() && existing_entry->second == object_hash)
         {
-            std::cerr << "File is already staged" << std::endl;
+            std::cerr << "File is already staged: " << file_path << std::endl;
             return Existing;
         }
 
@@ -223,12 +223,13 @@ namespace
     }
 }
 
-bool add(fs::path &object)
+bool add(const std::string &object_name)
 {
+    const fs::path object(object_name);
 
     if (!fs::exists(object))
     {
-        std::cerr << "No such file or directory found" << std::endl;
+        std::cerr << "No such file or directory: " << object << std::endl;
         return false;
     }
 
