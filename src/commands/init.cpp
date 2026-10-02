@@ -22,16 +22,18 @@ int init()
         fs::create_directories(".mgit/objects");
         fs::create_directories(".mgit/refs/heads");
         fs::create_directories(".mgit/refs/tags");
-        fs::create_directories(".mgit/refs/remotes");
-        fs::create_directories(".mgit/hooks");
         fs::create_directories(".mgit/logs");
-        fs::create_directories(".mgit/info");
 
-        //Create an index file
-        fs::path file_path = ".mgit/index";
-        std::ofstream file(file_path);
-        file.close();
-        
+        // Create a config file
+        fs::path config_path = ".mgit/config";
+        std::ofstream config_file(config_path);
+        config_file.close();
+
+        //  Create an index file
+        fs::path index_path = ".mgit/index";
+        std::ofstream index_file(index_path);
+        index_file.close();
+
         std::cout << "Initialized an empty repository" << std::endl;
         return 0;
     }

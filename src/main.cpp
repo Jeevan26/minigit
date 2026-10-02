@@ -5,7 +5,8 @@
 // header files
 #include "headers/init.hpp"
 #include "headers/add.hpp"
-
+#include "headers/commit.hpp"
+#include "headers/config.hpp"
 #include "headers/destory.hpp"
 
 int main(int argc, char *argv[])
@@ -18,7 +19,8 @@ int main(int argc, char *argv[])
 
     std::string command = argv[1];
 
-    if (command == "init"){
+    if (command == "init")
+    {
         return init();
     }
     else if (command == "add")
@@ -26,7 +28,19 @@ int main(int argc, char *argv[])
         std::string object = argv[2] ? argv[2] : "";
         return add(object);
     }
-    else if(command == "destroy"){
+    else if (command == "commit")
+    {
+        std::string msg = "";
+        return commit(msg);
+    }
+    else if (command == "config")
+    {
+        std::string cfg = argv[2] ? argv[2] : "";
+        std::string arg = argv[3] ? argv[3] : "";
+        config(cfg, arg);
+    }
+    else if (command == "destroy")
+    {
         return destroy();
     }
     else

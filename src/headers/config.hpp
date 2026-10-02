@@ -1,0 +1,1 @@
+bool config(std::string &cfg, std::string &arg);
