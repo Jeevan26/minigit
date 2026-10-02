@@ -19,8 +19,7 @@ namespace
     /// Checks if a child is within a given parent
     bool is_within(const fs::path &child, const fs::path &parent)
     {
-        // Path to reach child from parent
-        const fs::path relative = child.lexically_relative(parent);
+        const fs::path relative = child.lexically_normal().lexically_relative(parent.lexically_normal());
         return (!relative.empty() && relative.begin() != relative.end() && *relative.begin() != "..");
     }
 
