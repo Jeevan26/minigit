@@ -1,0 +1,1 @@
+bool commit(std::string &message);

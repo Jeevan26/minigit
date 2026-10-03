@@ -1,6 +1,7 @@
 FLAGS = -I src/headers -I src/commands -I src/crypto -MMD -MP
 
-SOURCES = src/main.cpp $(wildcard src/commands/*.cpp) $(wildcard src/crypto/*.cpp)
+COMMAND_SOURCES = $(filter-out src/commands/c.cpp,$(wildcard src/commands/*.cpp))
+SOURCES = src/main.cpp $(COMMAND_SOURCES) $(wildcard src/crypto/*.cpp)
 OBJECTS = $(SOURCES:.cpp=.o)
 DEPS = $(OBJECTS:.o=.d)
 

@@ -9,6 +9,8 @@
 #include "headers/config.hpp"
 #include "headers/destory.hpp"
 
+inline int status(bool boolean) { return !boolean; }
+
 int main(int argc, char *argv[])
 {
     if (argc < 2)
@@ -26,22 +28,22 @@ int main(int argc, char *argv[])
     else if (command == "add")
     {
         std::string object = argv[2] ? argv[2] : "";
-        return add(object);
+        return status(add(object));
     }
     else if (command == "commit")
     {
-        std::string msg = "";
-        return commit(msg);
+        std::string message = argv[2] ? argv[2] : "";
+        return status(commit(message));
     }
     else if (command == "config")
     {
         std::string cfg = argv[2] ? argv[2] : "";
         std::string arg = argv[3] ? argv[3] : "";
-        config(cfg, arg);
+        return status(config(cfg, arg));
     }
     else if (command == "destroy")
     {
-        return destroy();
+        return status(destroy());
     }
     else
     {

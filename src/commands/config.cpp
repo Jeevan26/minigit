@@ -17,6 +17,37 @@ namespace
         const auto last = str.find_last_not_of(" \t\n\r\f\v");
         return str.substr(first, last - first + 1);
     }
+
+    bool read_user_config(std::ifstream &config_file, std::string &name, std::string &email)
+    {
+        std::string line;
+        bool user_flag = false;
+
+        while (getline(config_file, line))
+        {
+            if (user_flag)
+            {
+                const auto separator = line.find('=');
+                if (separator == std::string::npos)
+                    continue;
+
+                std::string config_type = trim(line.substr(0, separator));
+                std::string config_detail = trim(line.substr(separator + 1));
+
+                if (config_type == "name")
+                    name = config_detail;
+                else if (config_type == "email")
+                {
+                    email = config_detail;
+                    user_flag = false;
+                }
+            }
+            if (line == "[user]")
+                user_flag = true;
+        }
+
+        return !config_file.bad() && (config_file.eof() || !config_file.fail());
+    }
 }
 
 bool config(std::string &cfg, std::string &arg)
@@ -53,71 +84,45 @@ bool config(std::string &cfg, std::string &arg)
         return false;
     }
 
-    std::string name, email;
+    // Fetch previous name and email if they exist
+    std::string name = "", email = "";
+    if (!read_user_config(config_file, name, email))
     {
-        // Fetch previous name and email if they exist
-        std::string line;
-        bool user_flag = false;
+        std::cerr << "Failed to read config file" << std::endl;
+        return false;
+    }
 
-        while (getline(config_file, line))
+    if (cfg == "name")
+        name = arg;
+    else if (cfg == "email")
+        email = arg;
+
+    try
+    {
+        // Overwrite the file with new data
+        std::ofstream modified_config(config_path, std::ios::trunc);
+        if (!modified_config.is_open())
         {
-            if (user_flag)
-            {
-                const auto separator = line.find('=');
-
-                std::string config_type = trim(line.substr(0, separator));
-                std::string config_detail = trim(line.substr(separator + 1));
-
-                if (config_type == "name")
-                    name = config_detail;
-                else if (config_type == "email")
-                {
-                    email = config_detail;
-                    user_flag = false;
-                }
-            }
-            if (line == "[user]")
-                user_flag = true;
-        }
-
-        if (config_file.bad() || (!config_file.eof() && config_file.fail()))
-        {
-            std::cerr << "Failed to read config file" << std::endl;
+            std::cerr << "Failed to open config file for writing" << std::endl;
             return false;
         }
 
-        if (cfg == "name")
-            name = arg;
-        else if (cfg == "email")
-            email = arg;
+        modified_config << "[user]" << std::endl;
+        modified_config << "\tname = " << name << std::endl;
+        modified_config << "\temail = " << email << std::endl;
+        modified_config.close();
 
-        try
+        if (!modified_config)
         {
-            // Overwrite the file with new data
-            std::ofstream modified_config(config_path, std::ios::trunc);
-            if (!modified_config.is_open())
-            {
-                std::cerr << "Failed to open config file for writing" << std::endl;
-                return false;
-            }
-
-            modified_config << "[user]" << std::endl;
-            modified_config << "\tname = " << name << std::endl;
-            modified_config << "\temail = " << email << std::endl;
-            modified_config.close();
-
-            if (!modified_config)
-            {
-                std::cerr << "Failed to write config file" << std::endl;
-                return false;
-            }
-
-            return true;
-        }
-        catch (fs::filesystem_error err)
-        {
-            std::cerr << "An error occured whilst trying to write to file: " << err.what() << std::endl;
+            std::cerr << "Failed to write config file" << std::endl;
             return false;
         }
+
+        return true;
+    }
+    catch (fs::filesystem_error err)
+    {
+        std::cerr << "An error occured whilst trying to write to file: " << err.what() << std::endl;
+        return false;
     }
 }

@@ -15,6 +15,11 @@ std::string hash(const std::vector<u_int8_t> &data)
     return sha256(bytes);
 }
 
+std::string hash(const std::string &data)
+{
+    return sha256(data);
+}
+
 std::string hash(std::istream &input)
 {
     const std::string bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
