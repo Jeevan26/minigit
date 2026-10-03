@@ -8,6 +8,7 @@
 #include "headers/commit.hpp"
 #include "headers/config.hpp"
 #include "headers/destory.hpp"
+#include "headers/log.hpp"
 
 inline int status(bool boolean) { return !boolean; }
 
@@ -44,6 +45,10 @@ int main(int argc, char *argv[])
     else if (command == "destroy")
     {
         return status(destroy());
+    }
+    else if (command == "log")
+    {
+        return status(log());
     }
     else
     {

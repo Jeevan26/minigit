@@ -107,6 +107,12 @@ bool config(std::string &cfg, std::string &arg)
             return false;
         }
 
+        modified_config << "[core]" << std::endl;
+        modified_config << "\trepositoryformatversion = 1" << std::endl;
+        modified_config << "\tfilemode = true" << std::endl;
+        modified_config << "\tbare = false" << std::endl;
+        modified_config << "[extensions]" << std::endl;
+        modified_config << "\tobjectFormat = sha256" << std::endl;
         modified_config << "[user]" << std::endl;
         modified_config << "\tname = " << name << std::endl;
         modified_config << "\temail = " << email << std::endl;

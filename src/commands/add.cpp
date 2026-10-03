@@ -1,14 +1,21 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <unordered_map>
 
-#include "hash.hpp"
+#include "object.hpp"
 
 namespace fs = std::filesystem;
 
 namespace
 {
+    struct IndexEntry
+    {
+        std::string hash;
+        std::string mode;
+    };
+
     enum Status
     {
         Success,
@@ -24,7 +31,7 @@ namespace
     }
 
     /// Loads entries from the index file
-    bool load_entries(const fs::path &index_path, std::unordered_map<std::string, std::string> &entries)
+    bool load_entries(const fs::path &index_path, std::unordered_map<std::string, IndexEntry> &entries)
     {
         // Throw an error cause this shouldn't occur
         if (!fs::exists(index_path))
@@ -42,16 +49,26 @@ namespace
             std::string line;
             while (std::getline(index, line))
             {
-                const auto separator = line.find('\t');
-
-                // Check for malformed lines
-                if (separator == std::string::npos || separator == 0 || separator + 1 == line.size())
+                const auto first_separator = line.find('\t');
+                if (first_separator == std::string::npos || first_separator == 0 ||
+                    first_separator + 1 == line.size())
                 {
                     std::cerr << "Invalid index entry" << std::endl;
                     return false;
                 }
 
-                entries[line.substr(separator + 1)] = line.substr(0, separator);
+                const auto second_separator = line.find('\t', first_separator + 1);
+                if (second_separator == std::string::npos)
+                    entries[line.substr(first_separator + 1)] = {line.substr(0, first_separator), "100644"};
+                else if (second_separator == first_separator + 1 || second_separator + 1 == line.size())
+                {
+                    std::cerr << "Invalid index entry" << std::endl;
+                    return false;
+                }
+                else
+                    entries[line.substr(second_separator + 1)] = {
+                        line.substr(first_separator + 1, second_separator - first_separator - 1),
+                        line.substr(0, first_separator)};
             }
 
             if (index.bad())
@@ -70,7 +87,7 @@ namespace
     }
 
     /// Saves entries to the index file
-    bool save_entries(const fs::path &index_path, const std::unordered_map<std::string, std::string> &entries)
+    bool save_entries(const fs::path &index_path, const std::unordered_map<std::string, IndexEntry> &entries)
     {
         const fs::path temporary_path = index_path.string() + ".tmp";
         std::ofstream index(temporary_path, std::ios::trunc);
@@ -80,8 +97,8 @@ namespace
             return false;
         }
 
-        for (const auto &[file_path, object_hash] : entries)
-            index << object_hash << '\t' << file_path << '\n';
+        for (const auto &[file_path, entry] : entries)
+            index << entry.mode << '\t' << entry.hash << '\t' << file_path << '\n';
 
         if (!index)
         {
@@ -134,10 +151,18 @@ namespace
             return Failure;
         }
 
+        const std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        if (file.bad())
+        {
+            std::cerr << "Failed to read file: " << file_path << std::endl;
+            return Failure;
+        }
+
         std::string object_hash;
         try
         {
-            object_hash = hash(file);
+            if (!object_store::write_object("blob", contents, object_hash))
+                return Failure;
         }
         catch (const std::exception &error)
         {
@@ -145,10 +170,13 @@ namespace
             return Failure;
         }
 
-        const fs::path object_path = fs::path(".mgit") / "objects" / object_hash;
-        const fs::path index_path = ".mgit/index";
+        const fs::path index_path = ".mgit/minigit-index";
         const std::string index_key = file_path.lexically_normal().generic_string();
-        std::unordered_map<std::string, std::string> entries;
+        std::unordered_map<std::string, IndexEntry> entries;
+
+        const auto permissions = fs::status(file_path).permissions();
+        const bool executable = (permissions & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != fs::perms::none;
+        const std::string mode = executable ? "100755" : "100644";
 
         if (!load_entries(index_path, entries))
         {
@@ -157,32 +185,16 @@ namespace
         }
 
         const auto existing_entry = entries.find(index_key);
-        if (existing_entry != entries.end() && existing_entry->second == object_hash)
+        if (existing_entry != entries.end() && existing_entry->second.hash == object_hash &&
+            existing_entry->second.mode == mode)
         {
             std::cerr << "File is already staged: " << file_path << std::endl;
             return Existing;
         }
 
-        bool object_created = false;
-        if (!fs::exists(object_path))
-        {
-            std::error_code error;
-            fs::copy_file(file_path, object_path, fs::copy_options::none, error);
-            if (error)
-            {
-                std::cerr << "Failed to store object: " << error.message() << std::endl;
-                return Failure;
-            }
-            object_created = true;
-        }
-
-        entries[index_key] = object_hash;
+        entries[index_key] = {object_hash, mode};
         if (!save_entries(index_path, entries))
-        {
-            if (object_created)
-                fs::remove(object_path);
             return Failure;
-        }
 
         return Success;
     }
@@ -245,7 +257,7 @@ bool add(const std::string &object_name)
         return false;
     }
 
-    fs::path index_path = ".mgit/index";
+    fs::path index_path = ".mgit/minigit-index";
     if (!fs::exists(index_path))
     {
         std::cerr << "Malformed repository found!" << std::endl;

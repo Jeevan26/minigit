@@ -1,249 +1,271 @@
-#include <filesystem>
-#include <iostream>
-#include <fstream>
-#include <unordered_map>
 #include <algorithm>
-#include <cctype>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "commit.hpp"
-#include "hash.hpp"
+#include "object.hpp"
 
 namespace
 {
     namespace fs = std::filesystem;
-
-    // Some path constants
     const fs::path mgit_repo = ".mgit";
-    const fs::path index_path = mgit_repo / "index";
+    const fs::path index_path = mgit_repo / "minigit-index";
     const fs::path config_file_path = mgit_repo / "config";
-    const fs::path objects_path = mgit_repo / "objects";
     const fs::path branch_path = mgit_repo / "refs" / "heads" / "main";
 
-    struct CommitFormat
+    struct FileEntry
     {
         std::string hash;
-        std::string parent;
-        std::string author_name;
-        std::string author_email;
-        std::time_t time;
-        std::string message;
+        std::string mode;
     };
 
-    enum Status
+    struct TreeNode
+    {
+        std::map<std::string, TreeNode> children;
+        std::string hash;
+        std::string mode;
+        bool is_file = false;
+    };
+
+    enum class Status
     {
         Success,
         Failure,
         Malformed
     };
 
-    bool valid_hash(const std::string &hash)
+    std::string trim(const std::string &value)
     {
-        return hash.size() == 64 &&
-               std::all_of(hash.begin(), hash.end(), [](unsigned char c)
-                           { return std::isxdigit(c) != 0; });
-    }
-
-    // Trim all kinds of whitespaces
-    std::string trim(const std::string &str)
-    {
-        const auto first = str.find_first_not_of(" \t\n\r\f\v");
+        const auto first = value.find_first_not_of(" \t\n\r\f\v");
         if (first == std::string::npos)
             return "";
-
-        const auto last = str.find_last_not_of(" \t\n\r\f\v");
-        return str.substr(first, last - first + 1);
+        const auto last = value.find_last_not_of(" \t\n\r\f\v");
+        return value.substr(first, last - first + 1);
     }
 
-    // Fetch author details
-    Status get_user_config(std::ifstream &config_file, std::string &name, std::string &email)
+    bool read_user_config(std::string &name, std::string &email)
     {
-        if (!config_file.is_open())
+        std::ifstream file(config_file_path);
+        if (!file)
         {
-            std::cerr << "Unable to read config file" << std::endl;
-            return Failure;
+            std::cerr << "Failed to open config file" << std::endl;
+            return false;
         }
 
-        name = email = "";
-
+        bool in_user = false;
         std::string line;
-        bool user_flag = false;
-        while (getline(config_file, line))
+        while (std::getline(file, line))
         {
-            if (user_flag)
-            {
-                const auto separator = line.find('=');
-
-                // If separator was not found
-                if (separator == std::string::npos)
-                    return Malformed;
-
-                std::string config_type = trim(line.substr(0, separator));
-                std::string config_value = trim(line.substr(separator + 1));
-
-                if (config_type == "name")
-                    name = config_value;
-                else if (config_type == "email")
-                {
-                    email = config_value;
-                    user_flag = false;
-                }
-                else
-                    return Malformed;
-            }
-
             if (trim(line) == "[user]")
-                user_flag = true;
+            {
+                in_user = true;
+                continue;
+            }
+            if (!in_user)
+                continue;
+
+            const auto separator = line.find('=');
+            if (separator == std::string::npos)
+                continue;
+            const std::string key = trim(line.substr(0, separator));
+            const std::string value = trim(line.substr(separator + 1));
+            if (key == "name")
+                name = value;
+            else if (key == "email")
+                email = value;
         }
-
-        if (user_flag)
-            return Malformed;
-
-        if (config_file.bad())
+        if (file.bad())
         {
-            std::cerr << "An error occurred while trying to read config file" << std::endl;
-            return Failure;
+            std::cerr << "Failed to read config file" << std::endl;
+            return false;
         }
-        else
-            return Success;
+        return true;
     }
 
-    Status load_staged_entries(std::unordered_map<std::string, std::string> &entries)
+    Status load_staged_entries(std::unordered_map<std::string, FileEntry> &entries)
     {
-        if (!fs::exists(index_path))
-            return Malformed;
-
         std::ifstream index(index_path);
         if (!index)
         {
             std::cerr << "Failed to read index file" << std::endl;
-            return Failure;
-        }
-
-        try
-        {
-            std::string line;
-            while (getline(index, line))
-            {
-                const auto separator = line.find('\t');
-
-                // Check for malformed lines
-                if (separator == std::string::npos || separator == 0 || separator == line.size() - 1)
-                    return Malformed;
-
-                // file_name = file_hash
-                entries[line.substr(separator + 1)] = line.substr(0, separator);
-            }
-
-            if (index.bad())
-            {
-                std::cerr << "Failed to read the index file" << std::endl;
-                return Failure;
-            }
-
-            return Success;
-        }
-        catch (const std::exception &error)
-        {
-            std::cerr << "An error occurred while reading index file: " << error.what() << std::endl;
-            return Failure;
-        }
-    }
-
-    Status load_commit_entries(const std::string &commit_hash, std::unordered_map<std::string, std::string> &entries)
-    {
-        std::ifstream commit_file(objects_path / commit_hash);
-        if (!commit_file)
-        {
-            std::cerr << "Failed to open parent commit object" << std::endl;
-            return Failure;
+            return Status::Failure;
         }
 
         std::string line;
-        if (!getline(commit_file, line) || line != "tree")
-            return Malformed;
-
-        bool msg_found = false;
-        bool meta_found = false;
-        while (getline(commit_file, line))
+        while (std::getline(index, line))
         {
-            if (line == "message")
-            {
-                msg_found = true;
-                break;
-            }
-
-            // If we find a blob
-            if (line.rfind("blob\t") == 0)
-            {
-                if (meta_found)
-                    return Malformed;
-
-                const auto hash_separator = line.find('\t', 5);
-
-                // An entry is of the form: blob<TAB>hash<TAB>path
-                if (hash_separator == std::string::npos || hash_separator == line.length() - 1 || hash_separator == 5)
-                    return Malformed;
-
-                std::string object_hash = line.substr(5, hash_separator - 5);
-                if (!valid_hash(object_hash))
-                    return Malformed;
-
-                entries[line.substr(hash_separator + 1)] = object_hash;
-            }
-
-            else if (line.rfind("parent", 0) == 0 || line.rfind("author", 0) == 0 || line.rfind("timestamp", 0) == 0)
-                meta_found = true;
-
+            const auto first = line.find('\t');
+            if (first == std::string::npos || first == 0 || first + 1 == line.size())
+                return Status::Malformed;
+            const auto second = line.find('\t', first + 1);
+            if (second == std::string::npos)
+                entries[line.substr(first + 1)] = {line.substr(0, first), "100644"};
+            else if (second == first + 1 || second + 1 == line.size())
+                return Status::Malformed;
             else
-                return Malformed;
+                entries[line.substr(second + 1)] = {
+                    line.substr(first + 1, second - first - 1),
+                    line.substr(0, first)};
         }
-
-        if (commit_file.bad())
+        if (index.bad())
         {
-            std::cerr << "An error occurred while trying to read the commit file" << std::endl;
-            return Failure;
+            std::cerr << "Failed to read index file" << std::endl;
+            return Status::Failure;
         }
-
-        if (!msg_found)
-            return Malformed;
-
-        return Success;
+        return Status::Success;
     }
 
-    Status write(const fs::path &file_path, const std::string &content)
+    bool flatten_tree(const std::string &tree_hash, const std::string &prefix,
+                      std::unordered_map<std::string, FileEntry> &entries)
     {
-        const fs::path temp_path = file_path.string() + ".tmp";
-        std::ofstream temp(temp_path, std::ios::binary | std::ios::trunc);
-
-        if (!temp)
+        std::vector<object_store::TreeEntry> tree;
+        if (!object_store::read_tree(tree_hash, tree))
+            return false;
+        for (const auto &entry : tree)
         {
-            std::cerr << "Failed to open a temp file for writing" << std::endl;
-            return Failure;
+            const std::string path = prefix.empty() ? entry.name : prefix + "/" + entry.name;
+            if (entry.mode == "40000")
+            {
+                if (!flatten_tree(entry.hash, path, entries))
+                    return false;
+            }
+            else
+                entries[path] = {entry.hash, entry.mode};
         }
+        return true;
+    }
 
-        temp.write(content.data(), static_cast<std::streamsize>(content.size()));
-        temp.close();
+    Status load_parent_entries(const std::string &commit_hash,
+                               std::unordered_map<std::string, FileEntry> &entries)
+    {
+        std::string contents;
+        if (!object_store::read_object(commit_hash, "commit", contents))
+            return Status::Malformed;
 
-        if (temp.fail())
+        std::istringstream commit(contents);
+        std::string line;
+        std::string tree_hash;
+        if (!std::getline(commit, line) || line.rfind("tree ", 0) != 0)
+            return Status::Malformed;
+        tree_hash = line.substr(5);
+        if (!object_store::valid_hash(tree_hash) || !flatten_tree(tree_hash, "", entries))
+            return Status::Malformed;
+        return Status::Success;
+    }
+
+    bool make_tree(const TreeNode &node, std::string &tree_hash)
+    {
+        std::vector<object_store::TreeEntry> entries;
+        for (const auto &[name, child] : node.children)
         {
-            std::cout << "Error writing to temp file" << std::endl;
-            return Failure;
+            if (child.is_file && !child.children.empty())
+                return false;
+
+            if (child.is_file)
+                entries.push_back({child.mode, name, child.hash});
+            else
+            {
+                std::string child_hash;
+                if (!make_tree(child, child_hash))
+                    return false;
+                entries.push_back({"40000", name, child_hash});
+            }
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto &left, const auto &right)
+                  {
+                      const std::string left_name = left.name + (left.mode == "40000" ? "/" : "");
+                      const std::string right_name = right.name + (right.mode == "40000" ? "/" : "");
+                      return left_name < right_name;
+                  });
+        return object_store::write_tree(entries, tree_hash);
+    }
+
+    bool build_root_tree(const std::unordered_map<std::string, FileEntry> &files,
+                         std::string &tree_hash)
+    {
+        TreeNode root;
+        for (const auto &[path, entry] : files)
+        {
+            const fs::path file_path(path);
+            if (path.empty() || file_path.is_absolute() ||
+                path.find('\n') != std::string::npos || path.find('\0') != std::string::npos ||
+                !object_store::valid_hash(entry.hash) ||
+                (entry.mode != "100644" && entry.mode != "100755"))
+            {
+                std::cerr << "Invalid path or object in snapshot: " << path << std::endl;
+                return false;
+            }
+
+            TreeNode *current = &root;
+            std::size_t start = 0;
+            while (start < path.size())
+            {
+                const auto separator = path.find('/', start);
+                const auto end = separator == std::string::npos ? path.size() : separator;
+                const std::string component = path.substr(start, end - start);
+                if (component.empty() || component == "." || component == "..")
+                {
+                    std::cerr << "Invalid path in snapshot: " << path << std::endl;
+                    return false;
+                }
+                current = &current->children[component];
+                if (separator == std::string::npos)
+                {
+                    if (current->is_file || !current->children.empty())
+                    {
+                        std::cerr << "Conflicting paths in snapshot: " << path << std::endl;
+                        return false;
+                    }
+                    current->is_file = true;
+                    current->hash = entry.hash;
+                    current->mode = entry.mode;
+                    break;
+                }
+                if (current->is_file)
+                {
+                    std::cerr << "Conflicting paths in snapshot: " << path << std::endl;
+                    return false;
+                }
+                start = separator + 1;
+            }
+        }
+        return make_tree(root, tree_hash);
+    }
+
+    bool write_atomically(const fs::path &path, const std::string &contents)
+    {
+        const fs::path temporary_path = path.string() + ".tmp";
+        std::ofstream file(temporary_path, std::ios::binary | std::ios::trunc);
+        if (!file)
+        {
+            std::cerr << "Failed to open temporary file for writing: " << path << std::endl;
+            return false;
+        }
+        file.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+        file.close();
+        if (!file)
+        {
+            fs::remove(temporary_path);
+            std::cerr << "Failed to write file: " << path << std::endl;
+            return false;
         }
 
         std::error_code error;
-        fs::rename(temp_path, file_path, error);
+        fs::rename(temporary_path, path, error);
         if (error)
         {
-            fs::remove(temp_path);
-            std::cerr << "Error renaming temp file" << std::endl;
-            return Failure;
+            fs::remove(temporary_path);
+            std::cerr << "Failed to replace file: " << error.message() << std::endl;
+            return false;
         }
-
-        return Success;
+        return true;
     }
 }
 
@@ -254,161 +276,115 @@ bool commit(std::string &message)
         std::cerr << "No repo initialized for the current project" << std::endl;
         return false;
     }
-
     if (trim(message).empty())
     {
         std::cout << "Enter your commit message: " << std::endl;
-        getline(std::cin, message);
-
+        std::getline(std::cin, message);
         if (trim(message).empty())
         {
             std::cerr << "Invalid commit message. Please try again" << std::endl;
             return false;
         }
     }
-
     if (!fs::exists(index_path) || !fs::exists(config_file_path))
     {
         std::cerr << "Malformed mgit repo found!" << std::endl;
         return false;
     }
 
-    std::string name, email;
-    std::ifstream config_file(config_file_path);
-    Status s1 = get_user_config(config_file, name, email);
-
-    if (s1 == Malformed)
-    {
-        std::cerr << "Malformed config file found" << std::endl;
+    std::string name;
+    std::string email;
+    if (!read_user_config(name, email))
         return false;
-    }
-    if (s1 == Failure)
-        return false;
-
-    std::unordered_map<std::string, std::string> staged_entries;
-    Status s2 = load_staged_entries(staged_entries);
-
-    if (s2 == Malformed)
-    {
-        std::cerr << "Malformed index file found" << std::endl;
-        return false;
-    }
-    if (s2 == Failure)
-        return false;
-
     if (trim(name).empty() || trim(email).empty())
     {
         std::cerr << "Please configure your user name and email before committing" << std::endl;
         return false;
     }
+    if (name.find_first_of("\r\n") != std::string::npos ||
+        email.find_first_of("<>\r\n") != std::string::npos)
+    {
+        std::cerr << "Configured author name or email contains invalid characters" << std::endl;
+        return false;
+    }
 
-    std::unordered_map<std::string, std::string> commit_entries;
+    std::unordered_map<std::string, FileEntry> staged_entries;
+    const Status index_status = load_staged_entries(staged_entries);
+    if (index_status != Status::Success)
+    {
+        if (index_status == Status::Malformed)
+            std::cerr << "Malformed index file found" << std::endl;
+        return false;
+    }
+
+    std::unordered_map<std::string, FileEntry> snapshot_entries;
     std::string parent;
-
     if (fs::exists(branch_path))
     {
-        std::ifstream branch_file(branch_path);
+        std::ifstream branch(branch_path);
         std::string extra_line;
-
-        if (!branch_file)
-        {
-            std::cerr << "Failed to read current branch" << std::endl;
-            return false;
-        }
-        else if (!getline(branch_file, parent))
+        if (!branch || !std::getline(branch, parent))
         {
             std::cerr << "Malformed branch file found" << std::endl;
             return false;
         }
-
         parent = trim(parent);
-        if (getline(branch_file, extra_line) || !valid_hash(parent))
+        if (std::getline(branch, extra_line) || !object_store::valid_hash(parent) || branch.bad())
         {
             std::cerr << "Malformed branch file found" << std::endl;
             return false;
         }
-        if (branch_file.bad())
+        if (load_parent_entries(parent, snapshot_entries) != Status::Success)
         {
-            std::cerr << "Failed to read current branch" << std::endl;
+            std::cerr << "Malformed parent commit found" << std::endl;
             return false;
         }
-
-        Status s3 = load_commit_entries(parent, commit_entries);
-        if (s3 == Malformed)
-        {
-            std::cerr << "Malformed commit file found" << std::endl;
-            return false;
-        }
-        else if (s3 == Failure)
-            return false;
     }
+    for (const auto &[path, entry] : staged_entries)
+        snapshot_entries[path] = entry;
 
-    // Copy staged entries into commit entries
-    for (const auto &[file_path, file_hash] : staged_entries)
-        commit_entries[file_path] = file_hash;
-
-    // Valid all entries in commit_entrires map
-    for (const auto &[file_path, file_hash] : commit_entries)
+    for (const auto &[path, entry] : snapshot_entries)
     {
-        if (!valid_hash(file_hash) || !fs::is_regular_file(objects_path / file_hash))
+        std::string blob;
+        if (!object_store::valid_hash(entry.hash) ||
+            (entry.mode != "100644" && entry.mode != "100755") ||
+            !object_store::read_object(entry.hash, "blob", blob))
         {
-            std::cerr << "Invalid or missing object for staged path: " << file_path << std::endl;
-            return false;
-        }
-        if (file_path.find('\n') != std::string::npos)
-        {
-            std::cerr << "Malformed entry found" << std::endl;
+            std::cerr << "Invalid or missing blob for staged path: " << path << std::endl;
             return false;
         }
     }
 
-    CommitFormat new_commit;
-    new_commit.parent = parent;
-    new_commit.author_name = name;
-    new_commit.author_email = email;
-    new_commit.time = std::time(nullptr);
-    new_commit.message = message;
-
-    // Sort entries to avoid duplicate commits
-    std::vector<std::pair<std::string, std::string>> sorted_entries(commit_entries.begin(), commit_entries.end());
-    std::sort(sorted_entries.begin(), sorted_entries.end(), [](const auto &left, const auto &right)
-              { return left.first < right.first; });
-
-    // Writing the necessary contents
-    std::ostringstream content;
-    content << "tree\n";
-    for (const auto &[file_path, file_hash] : sorted_entries)
-        content << "blob\t" << file_hash << '\t' << file_path << '\n';
-    if (!new_commit.parent.empty())
-        content << "parent " << new_commit.parent << '\n';
-    content << "author " << new_commit.author_name << " <" << new_commit.author_email << ">\n";
-    content << "timestamp " << new_commit.time << '\n';
-    content << "message\n"
-            << new_commit.message << '\n';
-
-    std::string commit_content = content.str();
-    new_commit.hash = hash(commit_content);
-
-    const fs::path commit_object_path = objects_path / new_commit.hash;
-
-    Status s4 = write(commit_object_path, commit_content);
-    if (s4 == Failure)
+    std::string tree_hash;
+    if (!build_root_tree(snapshot_entries, tree_hash))
         return false;
 
-    Status s5 = write(branch_path, new_commit.hash + "\n");
-    if (s5 == Failure)
+    const std::time_t timestamp = std::time(nullptr);
+    std::ostringstream serialized;
+    serialized << "tree " << tree_hash << '\n';
+    if (!parent.empty())
+        serialized << "parent " << parent << '\n';
+    serialized << "author " << name << " <" << email << "> " << timestamp << " +0000\n";
+    serialized << "committer " << name << " <" << email << "> " << timestamp << " +0000\n\n";
+    serialized << message;
+    if (message.empty() || message.back() != '\n')
+        serialized << '\n';
+
+    std::string commit_hash;
+    if (!object_store::write_object("commit", serialized.str(), commit_hash))
+        return false;
+
+    if (!write_atomically(branch_path, commit_hash + "\n"))
     {
         std::cerr << "Commit object was created, but current branch couldn't be updated" << std::endl;
         return false;
     }
-
-    Status s6 = write(index_path, "");
-    if (s6 == Failure)
+    if (!write_atomically(index_path, ""))
     {
         std::cerr << "Commit was created, but staging index couldn't be cleared" << std::endl;
         return false;
     }
 
-    std::cout << "Committed created with hash: " << new_commit.hash << std::endl;
+    std::cout << "Committed created with hash: " << commit_hash << std::endl;
     return true;
 }
