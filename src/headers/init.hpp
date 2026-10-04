@@ -1,3 +1,5 @@
 #pragma once
 
-int init();
+#include "status.hpp"
+
+Status init();

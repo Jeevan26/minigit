@@ -1,1 +1,3 @@
-bool destroy();
+#include "status.hpp"
+
+Status destroy();

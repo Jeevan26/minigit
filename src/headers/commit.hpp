@@ -1,1 +1,3 @@
-bool commit(std::string &message);
+#include "status.hpp"
+
+Status commit(std::string &message);

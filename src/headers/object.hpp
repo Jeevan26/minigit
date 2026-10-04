@@ -1,5 +1,7 @@
 #pragma once
 
+#include "status.hpp"
+
 #include <string>
 #include <vector>
 
@@ -13,8 +15,8 @@ namespace object_store
     };
 
     bool valid_hash(const std::string &hash);
-    bool write_object(const std::string &type, const std::string &contents, std::string &object_hash);
-    bool read_object(const std::string &object_hash, const std::string &expected_type, std::string &contents);
-    bool write_tree(const std::vector<TreeEntry> &entries, std::string &tree_hash);
-    bool read_tree(const std::string &tree_hash, std::vector<TreeEntry> &entries);
+    Status write_object(const std::string &type, const std::string &contents, std::string &object_hash);
+    Status read_object(const std::string &object_hash, const std::string &expected_type, std::string &contents);
+    Status write_tree(const std::vector<TreeEntry> &entries, std::string &tree_hash);
+    Status read_tree(const std::string &tree_hash, std::vector<TreeEntry> &entries);
 }

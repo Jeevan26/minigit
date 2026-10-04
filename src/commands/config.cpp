@@ -5,6 +5,7 @@
 #include "config.hpp"
 #include "paths.hpp"
 #include "repository.hpp"
+#include "status.hpp"
 
 namespace fs = std::filesystem;
 
@@ -20,7 +21,7 @@ namespace
         return str.substr(first, last - first + 1);
     }
 
-    bool read_user_config(std::ifstream &config_file, std::string &name, std::string &email)
+    Status read_user_config(std::ifstream &config_file, std::string &name, std::string &email)
     {
         std::string line;
         bool user_flag = false;
@@ -48,47 +49,47 @@ namespace
                 user_flag = true;
         }
 
-        return !config_file.bad() && (config_file.eof() || !config_file.fail());
+        return !config_file.bad() && (config_file.eof() || !config_file.fail()) ? Status::Success : Status::Failure;
     }
 }
 
-bool config(std::string &cfg, std::string &arg)
+Status config(std::string &cfg, std::string &arg)
 {
     if (cfg == "" || arg == "")
     {
         std::cerr << "Please provide sufficient arguments" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     if (!is_repository_initialized("No repo initialized in current directory!\nTry running \"mgit init\" first"))
-        return false;
+        return Status::Failure;
 
     const fs::path &config_path = mgit::paths::config_file;
     if (!fs::exists(config_path))
     {
         std::cerr << "Malformed repository found" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     std::ifstream config_file(config_path);
     if (!config_file)
     {
         std::cerr << "Failed to open config file" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     if (cfg != "name" && cfg != "email")
     {
         std::cerr << "Config setting not found" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     // Fetch previous name and email if they exist
     std::string name = "", email = "";
-    if (!read_user_config(config_file, name, email))
+    if (read_user_config(config_file, name, email) != Status::Success)
     {
         std::cerr << "Failed to read config file" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     if (cfg == "name")
@@ -103,7 +104,7 @@ bool config(std::string &cfg, std::string &arg)
         if (!modified_config.is_open())
         {
             std::cerr << "Failed to open config file for writing" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         modified_config << "[core]" << std::endl;
@@ -120,14 +121,14 @@ bool config(std::string &cfg, std::string &arg)
         if (!modified_config)
         {
             std::cerr << "Failed to write config file" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
-        return true;
+        return Status::Success;
     }
     catch (fs::filesystem_error err)
     {
         std::cerr << "An error occured whilst trying to write to file: " << err.what() << std::endl;
-        return false;
+        return Status::Failure;
     }
 }

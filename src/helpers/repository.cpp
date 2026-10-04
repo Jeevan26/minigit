@@ -1,5 +1,6 @@
 #include "repository.hpp"
 #include "paths.hpp"
+#include "status.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -13,7 +14,7 @@ bool is_repository_initialized(const std::string &error_message)
     return initialized;
 }
 
-bool current_branch_path(std::filesystem::path &path)
+Status current_branch_path(std::filesystem::path &path)
 {
     std::ifstream head(mgit::paths::head_file);
     std::string line;
@@ -21,7 +22,7 @@ bool current_branch_path(std::filesystem::path &path)
     if (!head || !std::getline(head, line) || std::getline(head, extra_line) || head.bad())
     {
         std::cerr << "Failed to read repository HEAD" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     // Check if the line starts with a prefix
@@ -29,7 +30,7 @@ bool current_branch_path(std::filesystem::path &path)
     if (line.rfind(prefix, 0) != 0)
     {
         std::cerr << "Invalid repository HEAD reference" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     // Validate refs path
@@ -38,7 +39,7 @@ bool current_branch_path(std::filesystem::path &path)
     if (reference.is_absolute() || component == reference.end() || *component != "refs")
     {
         std::cerr << "Invalid repository HEAD reference" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     // Validate head path
@@ -46,7 +47,7 @@ bool current_branch_path(std::filesystem::path &path)
     if (component == reference.end() || *component != "heads")
     {
         std::cerr << "Invalid repository HEAD reference" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     // Check if a head file reference exists
@@ -54,7 +55,7 @@ bool current_branch_path(std::filesystem::path &path)
     if (component == reference.end())
     {
         std::cerr << "Invalid repository HEAD reference" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     // Make sure that the reference was lexically normal
@@ -63,10 +64,10 @@ bool current_branch_path(std::filesystem::path &path)
         if (*component == "." || *component == "..")
         {
             std::cerr << "Invalid repository HEAD reference" << std::endl;
-            return false;
+            return Status::Failure;
         }
     }
 
     path = mgit::paths::repository_dir / reference;
-    return true;
+    return Status::Success;
 }

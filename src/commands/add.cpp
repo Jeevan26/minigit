@@ -7,6 +7,7 @@
 #include "object.hpp"
 #include "paths.hpp"
 #include "repository.hpp"
+#include "status.hpp"
 
 namespace fs = std::filesystem;
 
@@ -18,13 +19,6 @@ namespace
         std::string mode;
     };
 
-    enum Status
-    {
-        Success,
-        Failure,
-        Existing
-    };
-
     /// Checks if a child is within a given parent
     bool is_within(const fs::path &child, const fs::path &parent)
     {
@@ -33,7 +27,7 @@ namespace
     }
 
     /// Loads entries from the index file
-    bool load_entries(const fs::path &index_path, std::unordered_map<std::string, IndexEntry> &entries)
+    Status load_entries(const fs::path &index_path, std::unordered_map<std::string, IndexEntry> &entries)
     {
         // Throw an error cause this shouldn't occur
         if (!fs::exists(index_path))
@@ -43,7 +37,7 @@ namespace
         if (!index)
         {
             std::cerr << "Failed to open index" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         try
@@ -56,7 +50,7 @@ namespace
                     first_separator + 1 == line.size())
                 {
                     std::cerr << "Invalid index entry" << std::endl;
-                    return false;
+                    return Status::Failure;
                 }
 
                 const auto second_separator = line.find('\t', first_separator + 1);
@@ -65,7 +59,7 @@ namespace
                 else if (second_separator == first_separator + 1 || second_separator + 1 == line.size())
                 {
                     std::cerr << "Invalid index entry" << std::endl;
-                    return false;
+                    return Status::Failure;
                 }
                 else
                     entries[line.substr(second_separator + 1)] = {
@@ -76,27 +70,27 @@ namespace
             if (index.bad())
             {
                 std::cerr << "Failed to read index" << std::endl;
-                return false;
+                return Status::Failure;
             }
         }
         catch (const std::exception &error)
         {
             std::cerr << "Failed to read index: " << error.what() << std::endl;
-            return false;
+            return Status::Failure;
         }
 
-        return true;
+        return Status::Success;
     }
 
     /// Saves entries to the index file
-    bool save_entries(const fs::path &index_path, const std::unordered_map<std::string, IndexEntry> &entries)
+    Status save_entries(const fs::path &index_path, const std::unordered_map<std::string, IndexEntry> &entries)
     {
         const fs::path temporary_path = index_path.string() + ".tmp";
         std::ofstream index(temporary_path, std::ios::trunc);
         if (!index)
         {
             std::cerr << "Failed to open temporary index for writing" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         for (const auto &[file_path, entry] : entries)
@@ -106,7 +100,7 @@ namespace
         {
             std::cerr << "Failed to write temporary index" << std::endl;
             fs::remove(temporary_path);
-            return false;
+            return Status::Failure;
         }
 
         index.close();
@@ -115,7 +109,7 @@ namespace
         {
             fs::remove(temporary_path);
             std::cerr << "Failed to close temporary index" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         std::error_code error;
@@ -128,7 +122,7 @@ namespace
             {
                 fs::remove(temporary_path);
                 std::cerr << "Failed to replace index: " << error.message() << std::endl;
-                return false;
+                return Status::Failure;
             }
 
             error.clear();
@@ -137,11 +131,11 @@ namespace
             {
                 fs::remove(temporary_path);
                 std::cerr << "Failed to replace index: " << error.message() << std::endl;
-                return false;
+                return Status::Failure;
             }
         }
 
-        return true;
+        return Status::Success;
     }
 
     Status add_file(const fs::path &file_path)
@@ -150,26 +144,26 @@ namespace
         if (!file.is_open())
         {
             std::cerr << "Error opening file: " << file_path << std::endl;
-            return Failure;
+            return Status::Failure;
         }
 
         const std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         if (file.bad())
         {
             std::cerr << "Failed to read file: " << file_path << std::endl;
-            return Failure;
+            return Status::Failure;
         }
 
         std::string object_hash;
         try
         {
-            if (!object_store::write_object("blob", contents, object_hash))
-                return Failure;
+            if (object_store::write_object("blob", contents, object_hash) != Status::Success)
+                return Status::Failure;
         }
         catch (const std::exception &error)
         {
             std::cerr << "Failed to hash file: " << error.what() << std::endl;
-            return Failure;
+            return Status::Failure;
         }
 
         const std::string index_key = file_path.lexically_normal().generic_string();
@@ -179,22 +173,22 @@ namespace
         const bool executable = (permissions & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != fs::perms::none;
         const std::string mode = executable ? "100755" : "100644";
 
-        if (!load_entries(mgit::paths::index_file, entries))
+        if (load_entries(mgit::paths::index_file, entries) != Status::Success)
         {
             std::cerr << "An error occured whilst trying to fetch index entries" << std::endl;
-            return Failure;
+            return Status::Failure;
         }
 
         const auto existing_entry = entries.find(index_key);
         if (existing_entry != entries.end() && existing_entry->second.hash == object_hash &&
             existing_entry->second.mode == mode)
-            return Existing;
+            return Status::Existing;
 
         entries[index_key] = {object_hash, mode};
-        if (!save_entries(mgit::paths::index_file, entries))
-            return Failure;
+        if (save_entries(mgit::paths::index_file, entries) != Status::Success)
+            return Status::Failure;
 
-        return Success;
+        return Status::Success;
     }
 
     Status add_folder(const fs::path &folder_path)
@@ -215,9 +209,9 @@ namespace
                 if (it->is_regular_file())
                 {
                     const Status result = add_file(it->path());
-                    if (result == Failure)
-                        return Failure;
-                    if (result == Success)
+                    if (result == Status::Failure)
+                        return Status::Failure;
+                    if (result == Status::Success)
                         added_file = true;
                 }
             }
@@ -225,48 +219,48 @@ namespace
         catch (const fs::filesystem_error &error)
         {
             std::cerr << "Error traversing directory: " << error.what() << std::endl;
-            return Failure;
+            return Status::Failure;
         }
 
-        return added_file ? Success : Existing;
+        return added_file ? Status::Success : Status::Existing;
     }
 }
 
-bool add(const std::string &object_name)
+Status add(const std::string &object_name)
 {
     const fs::path object(object_name);
 
     if (!fs::exists(object))
     {
         std::cerr << "No such file or directory: " << object << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     const fs::path &git_repo = mgit::paths::repository_dir;
     if (is_within(object, git_repo))
     {
         std::cerr << "Cannot add files within mgit repository" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     if (!is_repository_initialized("No repository found. Try running \"mgit init\" first"))
-        return false;
+        return Status::Failure;
 
     const fs::path &index_path = mgit::paths::index_file;
     if (!fs::exists(index_path))
     {
         std::cerr << "Malformed repository found!" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     // If object is folder
     if (fs::is_directory(object))
     {
         const Status result = add_folder(object);
-        if (result == Failure)
-            return false;
-        std::cout << (result == Success ? "Successfully added files to staging" : "Already up to date") << std::endl;
-        return true;
+        if (result == Status::Failure)
+            return Status::Failure;
+        std::cout << (result == Status::Success ? "Successfully added files to staging" : "Already up to date") << std::endl;
+        return Status::Success;
     }
 
     // If object is a file
@@ -275,15 +269,15 @@ bool add(const std::string &object_name)
         try
         {
             const Status result = add_file(object);
-            if (result == Failure)
-                return false;
-            std::cout << (result == Success ? "Successfully added the file to staging" : "File is already up to date") << std::endl;
-            return true;
+            if (result == Status::Failure)
+                return Status::Failure;
+            std::cout << (result == Status::Success ? "Successfully added the file to staging" : "File is already up to date") << std::endl;
+            return Status::Success;
         }
         catch (const std::exception &error)
         {
             std::cout << "An error occured while trying to add file: " << error.what() << std::endl;
-            return false;
+            return Status::Failure;
         }
     }
 
@@ -291,6 +285,6 @@ bool add(const std::string &object_name)
     else
     {
         std::cerr << "Only files or directories can be a valid input" << std::endl;
-        return false;
+        return Status::Failure;
     }
 }

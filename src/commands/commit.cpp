@@ -14,6 +14,7 @@
 #include "paths.hpp"
 #include "repository.hpp"
 #include "write.hpp"
+#include "status.hpp"
 
 namespace
 {
@@ -34,7 +35,7 @@ namespace
         bool is_file = false;
     };
 
-    enum class Status
+    enum class LoadStatus
     {
         Success,
         Failure,
@@ -50,13 +51,13 @@ namespace
         return value.substr(first, last - first + 1);
     }
 
-    bool read_user_config(std::string &name, std::string &email)
+    Status read_user_config(std::string &name, std::string &email)
     {
         std::ifstream file(mgit::paths::config_file);
         if (!file)
         {
             std::cerr << "Failed to open config file" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         bool in_user = false;
@@ -84,18 +85,18 @@ namespace
         if (file.bad())
         {
             std::cerr << "Failed to read config file" << std::endl;
-            return false;
+            return Status::Failure;
         }
-        return true;
+        return Status::Success;
     }
 
-    Status load_staged_entries(std::unordered_map<std::string, FileEntry> &entries)
+    LoadStatus load_staged_entries(std::unordered_map<std::string, FileEntry> &entries)
     {
         std::ifstream index(mgit::paths::index_file);
         if (!index)
         {
             std::cerr << "Failed to read index file" << std::endl;
-            return Status::Failure;
+            return LoadStatus::Failure;
         }
 
         std::string line;
@@ -103,12 +104,12 @@ namespace
         {
             const auto first = line.find('\t');
             if (first == std::string::npos || first == 0 || first + 1 == line.size())
-                return Status::Malformed;
+                return LoadStatus::Malformed;
             const auto second = line.find('\t', first + 1);
             if (second == std::string::npos)
                 entries[line.substr(first + 1)] = {line.substr(0, first), "100644"};
             else if (second == first + 1 || second + 1 == line.size())
-                return Status::Malformed;
+                return LoadStatus::Malformed;
             else
                 entries[line.substr(second + 1)] = {
                     line.substr(first + 1, second - first - 1),
@@ -117,64 +118,64 @@ namespace
         if (index.bad())
         {
             std::cerr << "Failed to read index file" << std::endl;
-            return Status::Failure;
+            return LoadStatus::Failure;
         }
-        return Status::Success;
+        return LoadStatus::Success;
     }
 
-    bool flatten_tree(const std::string &tree_hash, const std::string &prefix,
+    Status flatten_tree(const std::string &tree_hash, const std::string &prefix,
                       std::unordered_map<std::string, FileEntry> &entries)
     {
         std::vector<object_store::TreeEntry> tree;
-        if (!object_store::read_tree(tree_hash, tree))
-            return false;
+        if (object_store::read_tree(tree_hash, tree) != Status::Success)
+            return Status::Failure;
         for (const auto &entry : tree)
         {
             const std::string path = prefix.empty() ? entry.name : prefix + "/" + entry.name;
             if (entry.mode == "40000")
             {
-                if (!flatten_tree(entry.hash, path, entries))
-                    return false;
+                if (flatten_tree(entry.hash, path, entries) != Status::Success)
+                    return Status::Failure;
             }
             else
                 entries[path] = {entry.hash, entry.mode};
         }
-        return true;
+        return Status::Success;
     }
 
-    Status load_parent_entries(const std::string &commit_hash,
+    LoadStatus load_parent_entries(const std::string &commit_hash,
                                std::unordered_map<std::string, FileEntry> &entries,
                                std::string &tree_hash)
     {
         std::string contents;
-        if (!object_store::read_object(commit_hash, "commit", contents))
-            return Status::Malformed;
+        if (object_store::read_object(commit_hash, "commit", contents) != Status::Success)
+            return LoadStatus::Malformed;
 
         std::istringstream commit(contents);
         std::string line;
         if (!std::getline(commit, line) || line.rfind("tree ", 0) != 0)
-            return Status::Malformed;
+            return LoadStatus::Malformed;
         tree_hash = line.substr(5);
-        if (!object_store::valid_hash(tree_hash) || !flatten_tree(tree_hash, "", entries))
-            return Status::Malformed;
-        return Status::Success;
+        if (!object_store::valid_hash(tree_hash) || flatten_tree(tree_hash, "", entries) != Status::Success)
+            return LoadStatus::Malformed;
+        return LoadStatus::Success;
     }
 
-    bool make_tree(const TreeNode &node, std::string &tree_hash)
+    Status make_tree(const TreeNode &node, std::string &tree_hash)
     {
         std::vector<object_store::TreeEntry> entries;
         for (const auto &[name, child] : node.children)
         {
             if (child.is_file && !child.children.empty())
-                return false;
+                return Status::Failure;
 
             if (child.is_file)
                 entries.push_back({child.mode, name, child.hash});
             else
             {
                 std::string child_hash;
-                if (!make_tree(child, child_hash))
-                    return false;
+                if (make_tree(child, child_hash) != Status::Success)
+                    return Status::Failure;
                 entries.push_back({"40000", name, child_hash});
             }
         }
@@ -187,7 +188,7 @@ namespace
         return object_store::write_tree(entries, tree_hash);
     }
 
-    bool build_root_tree(const std::unordered_map<std::string, FileEntry> &files,
+    Status build_root_tree(const std::unordered_map<std::string, FileEntry> &files,
                          std::string &tree_hash)
     {
         TreeNode root;
@@ -200,7 +201,7 @@ namespace
                 (entry.mode != "100644" && entry.mode != "100755"))
             {
                 std::cerr << "Invalid path or object in snapshot: " << path << std::endl;
-                return false;
+                return Status::Failure;
             }
 
             TreeNode *current = &root;
@@ -213,7 +214,7 @@ namespace
                 if (component.empty() || component == "." || component == "..")
                 {
                     std::cerr << "Invalid path in snapshot: " << path << std::endl;
-                    return false;
+                    return Status::Failure;
                 }
                 current = &current->children[component];
                 if (separator == std::string::npos)
@@ -221,7 +222,7 @@ namespace
                     if (current->is_file || !current->children.empty())
                     {
                         std::cerr << "Conflicting paths in snapshot: " << path << std::endl;
-                        return false;
+                        return Status::Failure;
                     }
                     current->is_file = true;
                     current->hash = entry.hash;
@@ -231,7 +232,7 @@ namespace
                 if (current->is_file)
                 {
                     std::cerr << "Conflicting paths in snapshot: " << path << std::endl;
-                    return false;
+                    return Status::Failure;
                 }
                 start = separator + 1;
             }
@@ -241,10 +242,10 @@ namespace
 
 }
 
-bool commit(std::string &message)
+Status commit(std::string &message)
 {
     if (!is_repository_initialized("No repo initialized for the current project"))
-        return false;
+        return Status::Failure;
     if (trim(message).empty())
     {
         std::cout << "Enter your commit message: " << std::endl;
@@ -252,13 +253,13 @@ bool commit(std::string &message)
         if (trim(message).empty())
         {
             std::cerr << "Invalid commit message. Please try again" << std::endl;
-            return false;
+            return Status::Failure;
         }
     }
     if (!fs::exists(mgit::paths::index_file) || !fs::exists(mgit::paths::config_file))
     {
         std::cerr << "Malformed mgit repo found!" << std::endl;
-        return false;
+        return Status::Failure;
     }
     // Resolve symbolic HEAD to its branch, or update HEAD directly while detached.
     std::ifstream head_file(mgit::paths::head_file, std::ios::binary);
@@ -268,7 +269,7 @@ bool commit(std::string &message)
         std::getline(head_file, extra_head_line) || head_file.bad())
     {
         std::cerr << "Failed to read repository HEAD" << std::endl;
-        return false;
+        return Status::Failure;
     }
     if (!head_reference.empty() && head_reference.back() == '\r')
         head_reference.pop_back();
@@ -278,36 +279,36 @@ bool commit(std::string &message)
         if (!object_store::valid_hash(head_reference))
         {
             std::cerr << "Invalid detached HEAD commit hash" << std::endl;
-            return false;
+            return Status::Failure;
         }
         branch_path = mgit::paths::head_file;
     }
-    else if (!current_branch_path(branch_path))
-        return false;
+    else if (current_branch_path(branch_path) != Status::Success)
+        return Status::Failure;
 
     std::string name;
     std::string email;
-    if (!read_user_config(name, email))
-        return false;
+    if (read_user_config(name, email) != Status::Success)
+        return Status::Failure;
     if (trim(name).empty() || trim(email).empty())
     {
         std::cerr << "Please configure your user name and email before committing" << std::endl;
-        return false;
+        return Status::Failure;
     }
     if (name.find_first_of("\r\n") != std::string::npos ||
         email.find_first_of("<>\r\n") != std::string::npos)
     {
         std::cerr << "Configured author name or email contains invalid characters" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     std::unordered_map<std::string, FileEntry> staged_entries;
-    const Status index_status = load_staged_entries(staged_entries);
-    if (index_status != Status::Success)
+    const LoadStatus index_status = load_staged_entries(staged_entries);
+    if (index_status != LoadStatus::Success)
     {
-        if (index_status == Status::Malformed)
+        if (index_status == LoadStatus::Malformed)
             std::cerr << "Malformed index file found" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     std::unordered_map<std::string, FileEntry> snapshot_entries;
@@ -320,18 +321,18 @@ bool commit(std::string &message)
         if (!branch || !std::getline(branch, parent))
         {
             std::cerr << "Malformed branch file found" << std::endl;
-            return false;
+            return Status::Failure;
         }
         parent = trim(parent);
         if (std::getline(branch, extra_line) || !object_store::valid_hash(parent) || branch.bad())
         {
             std::cerr << "Malformed branch file found" << std::endl;
-            return false;
+            return Status::Failure;
         }
-        if (load_parent_entries(parent, snapshot_entries, parent_tree_hash) != Status::Success)
+        if (load_parent_entries(parent, snapshot_entries, parent_tree_hash) != LoadStatus::Success)
         {
             std::cerr << "Malformed parent commit found" << std::endl;
-            return false;
+            return Status::Failure;
         }
     }
     // Apply staged entries over the parent snapshot to produce the next complete tree.
@@ -343,21 +344,21 @@ bool commit(std::string &message)
         std::string blob;
         if (!object_store::valid_hash(entry.hash) ||
             (entry.mode != "100644" && entry.mode != "100755") ||
-            !object_store::read_object(entry.hash, "blob", blob))
+            object_store::read_object(entry.hash, "blob", blob) != Status::Success)
         {
             std::cerr << "Invalid or missing blob for staged path: " << path << std::endl;
-            return false;
+            return Status::Failure;
         }
     }
 
     std::string tree_hash;
-    if (!build_root_tree(snapshot_entries, tree_hash))
-        return false;
+    if (build_root_tree(snapshot_entries, tree_hash) != Status::Success)
+        return Status::Failure;
 
     if (!parent.empty() && tree_hash == parent_tree_hash)
     {
         std::cerr << "Nothing to commit: staged files are identical to the last commit" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     const std::time_t timestamp = std::time(nullptr);
@@ -372,20 +373,20 @@ bool commit(std::string &message)
         serialized << '\n';
 
     std::string commit_hash;
-    if (!object_store::write_object("commit", serialized.str(), commit_hash))
-        return false;
+    if (object_store::write_object("commit", serialized.str(), commit_hash) != Status::Success)
+        return Status::Failure;
 
-    if (!write_file_atomically(branch_path, commit_hash + "\n"))
+    if (write_file_atomically(branch_path, commit_hash + "\n") != Status::Success)
     {
         std::cerr << "Commit object was created, but current branch couldn't be updated" << std::endl;
-        return false;
+        return Status::Failure;
     }
-    if (!write_file_atomically(mgit::paths::index_file, ""))
+    if (write_file_atomically(mgit::paths::index_file, "") != Status::Success)
     {
         std::cerr << "Commit was created, but staging index couldn't be cleared" << std::endl;
-        return false;
+        return Status::Failure;
     }
 
     std::cout << "Committed created with hash: " << commit_hash << std::endl;
-    return true;
+    return Status::Success;
 }

@@ -1,1 +1,3 @@
-bool log();
+#include "status.hpp"
+
+Status log();

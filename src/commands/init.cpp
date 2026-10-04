@@ -4,17 +4,18 @@
 
 #include "init.hpp"
 #include "paths.hpp"
+#include "status.hpp"
 #include "repository.hpp"
 
 namespace fs = std::filesystem;
 
-int init()
+Status init()
 {
 
     if (is_repository_initialized())
     {
         std::cout << "A repository already exists!" << std::endl;
-        return 0;
+        return Status::Existing;
     }
 
     // Try creating the .mgit directory and its subdirectories
@@ -37,7 +38,7 @@ int init()
         if (!config_file)
         {
             std::cerr << "Failed to write repository config" << std::endl;
-            return 1;
+            return Status::Failure;
         }
 
         // Point Git and minigit at the initial branch.
@@ -48,7 +49,7 @@ int init()
         if (!head_file)
         {
             std::cerr << "Failed to write HEAD reference" << std::endl;
-            return 1;
+            return Status::Failure;
         }
 
         // Keep minigit's staging data separate from Git's native index.
@@ -57,15 +58,15 @@ int init()
         if (!index_file)
         {
             std::cerr << "Failed to create index file" << std::endl;
-            return 1;
+            return Status::Failure;
         }
 
         std::cout << "Initialized an empty repository" << std::endl;
-        return 0;
+        return Status::Success;
     }
     catch (const std::exception &e)
     {
         std::cerr << "Error initializing repository: " << e.what() << std::endl;
-        return 1;
+        return Status::Failure;
     }
 }

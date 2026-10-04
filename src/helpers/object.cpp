@@ -9,6 +9,7 @@
 #include "hash.hpp"
 #include "object.hpp"
 #include "paths.hpp"
+#include "status.hpp"
 
 namespace
 {
@@ -20,10 +21,10 @@ namespace
         return mgit::paths::objects_dir / object_hash.substr(0, 2) / object_hash.substr(2);
     }
 
-    bool decode_hash(const std::string &hex, std::string &bytes)
+    Status decode_hash(const std::string &hex, std::string &bytes)
     {
         if (!object_store::valid_hash(hex))
-            return false;
+            return Status::Failure;
 
         bytes.clear();
         bytes.reserve(hash_bytes);
@@ -37,7 +38,7 @@ namespace
             };
             bytes.push_back(static_cast<char>((digit(hex[i]) << 4) | digit(hex[i + 1])));
         }
-        return true;
+        return Status::Success;
     }
 
     std::string encode_hash(const std::string &bytes)
@@ -53,14 +54,14 @@ namespace
         return hex;
     }
 
-    bool write_object_file(const fs::path &path, const std::string &data)
+    Status write_object_file(const fs::path &path, const std::string &data)
     {
         std::error_code directory_error;
         fs::create_directories(path.parent_path(), directory_error);
         if (directory_error)
         {
             std::cerr << "Failed to create Git object directory: " << directory_error.message() << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         const fs::path temporary_path = path.string() + ".tmp";
@@ -68,7 +69,7 @@ namespace
         if (!file)
         {
             std::cerr << "Failed to open temporary Git object" << std::endl;
-            return false;
+            return Status::Failure;
         }
         file.write(data.data(), static_cast<std::streamsize>(data.size()));
         file.close();
@@ -76,7 +77,7 @@ namespace
         {
             fs::remove(temporary_path);
             std::cerr << "Failed to write Git object" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         std::error_code error;
@@ -84,15 +85,15 @@ namespace
         if (error && fs::exists(path))
         {
             fs::remove(temporary_path);
-            return true;
+            return Status::Success;
         }
         if (error)
         {
             fs::remove(temporary_path);
             std::cerr << "Failed to store Git object: " << error.message() << std::endl;
-            return false;
+            return Status::Failure;
         }
-        return true;
+        return Status::Success;
     }
 }
 
@@ -105,12 +106,12 @@ namespace object_store
                            { return std::isxdigit(c) != 0; });
     }
 
-    bool write_object(const std::string &type, const std::string &contents, std::string &object_hash)
+    Status write_object(const std::string &type, const std::string &contents, std::string &object_hash)
     {
         if (type != "blob" && type != "tree" && type != "commit")
         {
             std::cerr << "Unsupported Git object type" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         const std::string header = type + " " + std::to_string(contents.size()) + '\0';
@@ -122,24 +123,24 @@ namespace object_store
         if (error)
         {
             std::cerr << "Failed to create objects directory: " << error.message() << std::endl;
-            return false;
+            return Status::Failure;
         }
         return write_object_file(object_path(object_hash), serialized);
     }
 
-    bool read_object(const std::string &object_hash, const std::string &expected_type, std::string &contents)
+    Status read_object(const std::string &object_hash, const std::string &expected_type, std::string &contents)
     {
         if (!valid_hash(object_hash))
-            return false;
+            return Status::Failure;
 
         std::ifstream file(object_path(object_hash), std::ios::binary);
         if (!file)
-            return false;
+            return Status::Failure;
         const std::string serialized((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         if (file.bad())
         {
             std::cerr << "Failed to read Git object" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         const auto separator = serialized.find('\0');
@@ -147,13 +148,13 @@ namespace object_store
             hash(serialized) != object_hash)
         {
             std::cerr << "Git object hash verification failed" << std::endl;
-            return false;
+            return Status::Failure;
         }
 
         const std::string header = serialized.substr(0, separator);
         const auto space = header.find(' ');
         if (space == std::string::npos || header.substr(0, space) != expected_type)
-            return false;
+            return Status::Failure;
 
         std::size_t declared_size = 0;
         try
@@ -162,23 +163,23 @@ namespace object_store
             std::size_t parsed = 0;
             declared_size = std::stoull(size_text, &parsed);
             if (parsed != size_text.size())
-                return false;
+                return Status::Failure;
         }
         catch (const std::exception &)
         {
-            return false;
+            return Status::Failure;
         }
 
         contents = serialized.substr(separator + 1);
         if (declared_size != contents.size())
         {
             std::cerr << "Git object size does not match its header" << std::endl;
-            return false;
+            return Status::Failure;
         }
-        return true;
+        return Status::Success;
     }
 
-    bool write_tree(const std::vector<TreeEntry> &entries, std::string &tree_hash)
+    Status write_tree(const std::vector<TreeEntry> &entries, std::string &tree_hash)
     {
         std::string contents;
         for (const auto &entry : entries)
@@ -186,21 +187,21 @@ namespace object_store
             std::string raw_hash;
             if ((entry.mode != "100644" && entry.mode != "100755" && entry.mode != "40000") ||
                 entry.name.empty() || entry.name.find('/') != std::string::npos ||
-                entry.name.find('\0') != std::string::npos || !decode_hash(entry.hash, raw_hash))
+                entry.name.find('\0') != std::string::npos || decode_hash(entry.hash, raw_hash) != Status::Success)
             {
                 std::cerr << "Invalid Git tree entry" << std::endl;
-                return false;
+                return Status::Failure;
             }
             contents += entry.mode + " " + entry.name + '\0' + raw_hash;
         }
         return write_object("tree", contents, tree_hash);
     }
 
-    bool read_tree(const std::string &tree_hash, std::vector<TreeEntry> &entries)
+    Status read_tree(const std::string &tree_hash, std::vector<TreeEntry> &entries)
     {
         std::string contents;
-        if (!read_object(tree_hash, "tree", contents))
-            return false;
+        if (read_object(tree_hash, "tree", contents) != Status::Success)
+            return Status::Failure;
 
         entries.clear();
         std::size_t offset = 0;
@@ -212,7 +213,7 @@ namespace object_store
                 contents.size() - nul - 1 < hash_bytes)
             {
                 std::cerr << "Malformed Git tree object" << std::endl;
-                return false;
+                return Status::Failure;
             }
 
             TreeEntry entry;
@@ -223,11 +224,11 @@ namespace object_store
                 (entry.mode != "100644" && entry.mode != "100755" && entry.mode != "40000"))
             {
                 std::cerr << "Malformed Git tree entry" << std::endl;
-                return false;
+                return Status::Failure;
             }
             entries.push_back(std::move(entry));
             offset = nul + 1 + hash_bytes;
         }
-        return true;
+        return Status::Success;
     }
 }

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "status.hpp"
+
 #include <filesystem>
 #include <string>
 
-bool write_file_atomically(const std::filesystem::path &path, const std::string &contents);
+Status write_file_atomically(const std::filesystem::path &path, const std::string &contents);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "status.hpp"
+
 #include <string>
 
-bool add(const std::string &object);
+Status add(const std::string &object);
