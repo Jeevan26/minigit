@@ -68,28 +68,40 @@ bool log()
         std::cerr << "No repository found in this project" << std::endl;
         return false;
     }
-    fs::path branch_path;
-    if (!current_branch_path(branch_path))
-        return false;
-    std::ifstream branch(branch_path);
-    if (!branch)
+    std::ifstream head(".mgit/HEAD");
+    std::string head_reference;
+    std::string extra_head_line;
+    if (!head || !std::getline(head, head_reference) ||
+        std::getline(head, extra_head_line) || head.bad())
     {
-        std::cerr << "No commit head found for the current branch" << std::endl;
+        std::cerr << "Failed to read repository HEAD" << std::endl;
         return false;
     }
-
+    if (!head_reference.empty() && head_reference.back() == '\r')
+        head_reference.pop_back();
     std::string commit_hash;
-    std::string extra_line;
-    if (!std::getline(branch, commit_hash) || std::getline(branch, extra_line))
+    if (head_reference.rfind("ref: ", 0) == 0)
     {
-        std::cerr << "Invalid current branch reference" << std::endl;
-        return false;
+        fs::path branch_path;
+        if (!current_branch_path(branch_path))
+            return false;
+        std::ifstream branch(branch_path);
+        std::string extra_line;
+        if (!branch || !std::getline(branch, commit_hash) || std::getline(branch, extra_line))
+        {
+            std::cerr << "Invalid current branch reference" << std::endl;
+            return false;
+        }
+        if (!commit_hash.empty() && commit_hash.back() == '\r')
+            commit_hash.pop_back();
     }
-    if (!commit_hash.empty() && commit_hash.back() == '\r')
-        commit_hash.pop_back();
+    else
+    {
+        commit_hash = head_reference;
+    }
     if (!object_store::valid_hash(commit_hash))
     {
-        std::cerr << "Current branch points to an invalid commit hash" << std::endl;
+        std::cerr << "HEAD points to an invalid commit hash or no commit exists" << std::endl;
         return false;
     }
 

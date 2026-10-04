@@ -12,6 +12,7 @@
 #include "commit.hpp"
 #include "object.hpp"
 #include "repository.hpp"
+#include "write.hpp"
 
 namespace
 {
@@ -240,34 +241,6 @@ namespace
         return make_tree(root, tree_hash);
     }
 
-    bool write_atomically(const fs::path &path, const std::string &contents)
-    {
-        const fs::path temporary_path = path.string() + ".tmp";
-        std::ofstream file(temporary_path, std::ios::binary | std::ios::trunc);
-        if (!file)
-        {
-            std::cerr << "Failed to open temporary file for writing: " << path << std::endl;
-            return false;
-        }
-        file.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-        file.close();
-        if (!file)
-        {
-            fs::remove(temporary_path);
-            std::cerr << "Failed to write file: " << path << std::endl;
-            return false;
-        }
-
-        std::error_code error;
-        fs::rename(temporary_path, path, error);
-        if (error)
-        {
-            fs::remove(temporary_path);
-            std::cerr << "Failed to replace file: " << error.message() << std::endl;
-            return false;
-        }
-        return true;
-    }
 }
 
 bool commit(std::string &message)
@@ -292,8 +265,29 @@ bool commit(std::string &message)
         std::cerr << "Malformed mgit repo found!" << std::endl;
         return false;
     }
-    // Resolve HEAD so commits update whichever branch is currently checked out.
-    if (!current_branch_path(branch_path))
+    // Resolve symbolic HEAD to its branch, or update HEAD directly while detached.
+    std::ifstream head_file(mgit_repo / "HEAD", std::ios::binary);
+    std::string head_reference;
+    std::string extra_head_line;
+    if (!head_file || !std::getline(head_file, head_reference) ||
+        std::getline(head_file, extra_head_line) || head_file.bad())
+    {
+        std::cerr << "Failed to read repository HEAD" << std::endl;
+        return false;
+    }
+    if (!head_reference.empty() && head_reference.back() == '\r')
+        head_reference.pop_back();
+    const bool detached_head = head_reference.rfind("ref: ", 0) != 0;
+    if (detached_head)
+    {
+        if (!object_store::valid_hash(head_reference))
+        {
+            std::cerr << "Invalid detached HEAD commit hash" << std::endl;
+            return false;
+        }
+        branch_path = mgit_repo / "HEAD";
+    }
+    else if (!current_branch_path(branch_path))
         return false;
 
     std::string name;
@@ -324,7 +318,7 @@ bool commit(std::string &message)
     std::unordered_map<std::string, FileEntry> snapshot_entries;
     std::string parent;
     std::string parent_tree_hash;
-    if (fs::exists(branch_path))
+    if (detached_head || fs::exists(branch_path))
     {
         std::ifstream branch(branch_path);
         std::string extra_line;
@@ -386,12 +380,12 @@ bool commit(std::string &message)
     if (!object_store::write_object("commit", serialized.str(), commit_hash))
         return false;
 
-    if (!write_atomically(branch_path, commit_hash + "\n"))
+    if (!write_file_atomically(branch_path, commit_hash + "\n"))
     {
         std::cerr << "Commit object was created, but current branch couldn't be updated" << std::endl;
         return false;
     }
-    if (!write_atomically(index_path, ""))
+    if (!write_file_atomically(index_path, ""))
     {
         std::cerr << "Commit was created, but staging index couldn't be cleared" << std::endl;
         return false;
