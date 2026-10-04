@@ -1,4 +1,5 @@
 #include "repository.hpp"
+#include "paths.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -6,7 +7,7 @@
 
 bool current_branch_path(std::filesystem::path &path)
 {
-    std::ifstream head(".mgit/HEAD");
+    std::ifstream head(mgit::paths::head_file);
     std::string line;
     std::string extra_line;
     if (!head || !std::getline(head, line) || std::getline(head, extra_line) || head.bad())
@@ -58,6 +59,6 @@ bool current_branch_path(std::filesystem::path &path)
         }
     }
 
-    path = std::filesystem::path(".mgit") / reference;
+    path = mgit::paths::repository_dir / reference;
     return true;
 }

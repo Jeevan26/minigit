@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "config.hpp"
+#include "paths.hpp"
 
 namespace fs = std::filesystem;
 
@@ -58,13 +59,13 @@ bool config(std::string &cfg, std::string &arg)
         return false;
     }
 
-    if (!fs::exists(".mgit"))
+    if (!fs::exists(mgit::paths::repository_dir))
     {
         std::cerr << "No repo initialized in current directory!\nTry running \"mgit init\" first" << std::endl;
         return false;
     }
 
-    fs::path config_path = ".mgit/config";
+    const fs::path &config_path = mgit::paths::config_file;
     if (!fs::exists(config_path))
     {
         std::cerr << "Malformed repository found" << std::endl;

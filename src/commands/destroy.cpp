@@ -2,12 +2,13 @@
 #include <iostream>
 
 #include "destory.hpp"
+#include "paths.hpp"
 
 namespace fs = std::filesystem;
 
 bool destroy()
 {
-    fs::path mgit_repo = ".mgit";
+    const fs::path &mgit_repo = mgit::paths::repository_dir;
 
     if (!fs::exists(mgit_repo))
     {

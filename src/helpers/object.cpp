@@ -8,16 +8,16 @@
 
 #include "hash.hpp"
 #include "object.hpp"
+#include "paths.hpp"
 
 namespace
 {
     namespace fs = std::filesystem;
-    const fs::path objects_path = ".mgit/objects";
     constexpr std::size_t hash_bytes = 32;
 
     fs::path object_path(const std::string &object_hash)
     {
-        return objects_path / object_hash.substr(0, 2) / object_hash.substr(2);
+        return mgit::paths::objects_dir / object_hash.substr(0, 2) / object_hash.substr(2);
     }
 
     bool decode_hash(const std::string &hex, std::string &bytes)
@@ -118,7 +118,7 @@ namespace object_store
         object_hash = hash(serialized);
 
         std::error_code error;
-        fs::create_directories(objects_path, error);
+        fs::create_directories(mgit::paths::objects_dir, error);
         if (error)
         {
             std::cerr << "Failed to create objects directory: " << error.message() << std::endl;

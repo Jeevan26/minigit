@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "object.hpp"
+#include "paths.hpp"
 
 namespace fs = std::filesystem;
 
@@ -170,7 +171,6 @@ namespace
             return Failure;
         }
 
-        const fs::path index_path = ".mgit/minigit-index";
         const std::string index_key = file_path.lexically_normal().generic_string();
         std::unordered_map<std::string, IndexEntry> entries;
 
@@ -178,7 +178,7 @@ namespace
         const bool executable = (permissions & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != fs::perms::none;
         const std::string mode = executable ? "100755" : "100644";
 
-        if (!load_entries(index_path, entries))
+        if (!load_entries(mgit::paths::index_file, entries))
         {
             std::cerr << "An error occured whilst trying to fetch index entries" << std::endl;
             return Failure;
@@ -190,7 +190,7 @@ namespace
             return Existing;
 
         entries[index_key] = {object_hash, mode};
-        if (!save_entries(index_path, entries))
+        if (!save_entries(mgit::paths::index_file, entries))
             return Failure;
 
         return Success;
@@ -202,7 +202,7 @@ namespace
 
         try
         {
-            fs::path git_repo = ".mgit";
+            const fs::path &git_repo = mgit::paths::repository_dir;
             for (fs::recursive_directory_iterator it(folder_path), end; it != end; ++it)
             {
                 if (is_within(it->path(), git_repo))
@@ -241,7 +241,7 @@ bool add(const std::string &object_name)
         return false;
     }
 
-    fs::path git_repo = ".mgit";
+    const fs::path &git_repo = mgit::paths::repository_dir;
     if (is_within(object, git_repo))
     {
         std::cerr << "Cannot add files within mgit repository" << std::endl;
@@ -254,7 +254,7 @@ bool add(const std::string &object_name)
         return false;
     }
 
-    fs::path index_path = ".mgit/minigit-index";
+    const fs::path &index_path = mgit::paths::index_file;
     if (!fs::exists(index_path))
     {
         std::cerr << "Malformed repository found!" << std::endl;

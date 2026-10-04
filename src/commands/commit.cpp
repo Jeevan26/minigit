@@ -11,15 +11,13 @@
 
 #include "commit.hpp"
 #include "object.hpp"
+#include "paths.hpp"
 #include "repository.hpp"
 #include "write.hpp"
 
 namespace
 {
     namespace fs = std::filesystem;
-    const fs::path mgit_repo = ".mgit";
-    const fs::path index_path = mgit_repo / "minigit-index";
-    const fs::path config_file_path = mgit_repo / "config";
     fs::path branch_path;
 
     struct FileEntry
@@ -54,7 +52,7 @@ namespace
 
     bool read_user_config(std::string &name, std::string &email)
     {
-        std::ifstream file(config_file_path);
+        std::ifstream file(mgit::paths::config_file);
         if (!file)
         {
             std::cerr << "Failed to open config file" << std::endl;
@@ -93,7 +91,7 @@ namespace
 
     Status load_staged_entries(std::unordered_map<std::string, FileEntry> &entries)
     {
-        std::ifstream index(index_path);
+        std::ifstream index(mgit::paths::index_file);
         if (!index)
         {
             std::cerr << "Failed to read index file" << std::endl;
@@ -245,7 +243,7 @@ namespace
 
 bool commit(std::string &message)
 {
-    if (!fs::exists(mgit_repo))
+    if (!fs::exists(mgit::paths::repository_dir))
     {
         std::cerr << "No repo initialized for the current project" << std::endl;
         return false;
@@ -260,13 +258,13 @@ bool commit(std::string &message)
             return false;
         }
     }
-    if (!fs::exists(index_path) || !fs::exists(config_file_path))
+    if (!fs::exists(mgit::paths::index_file) || !fs::exists(mgit::paths::config_file))
     {
         std::cerr << "Malformed mgit repo found!" << std::endl;
         return false;
     }
     // Resolve symbolic HEAD to its branch, or update HEAD directly while detached.
-    std::ifstream head_file(mgit_repo / "HEAD", std::ios::binary);
+    std::ifstream head_file(mgit::paths::head_file, std::ios::binary);
     std::string head_reference;
     std::string extra_head_line;
     if (!head_file || !std::getline(head_file, head_reference) ||
@@ -285,7 +283,7 @@ bool commit(std::string &message)
             std::cerr << "Invalid detached HEAD commit hash" << std::endl;
             return false;
         }
-        branch_path = mgit_repo / "HEAD";
+        branch_path = mgit::paths::head_file;
     }
     else if (!current_branch_path(branch_path))
         return false;
@@ -385,7 +383,7 @@ bool commit(std::string &message)
         std::cerr << "Commit object was created, but current branch couldn't be updated" << std::endl;
         return false;
     }
-    if (!write_file_atomically(index_path, ""))
+    if (!write_file_atomically(mgit::paths::index_file, ""))
     {
         std::cerr << "Commit was created, but staging index couldn't be cleared" << std::endl;
         return false;

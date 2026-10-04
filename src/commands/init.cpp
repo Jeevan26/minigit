@@ -3,13 +3,14 @@
 #include <fstream>
 
 #include "init.hpp"
+#include "paths.hpp"
 
 namespace fs = std::filesystem;
 
 int init()
 {
 
-    if (fs::is_directory("./.mgit"))
+    if (fs::is_directory(mgit::paths::repository_dir))
     {
         std::cout << "A repository already exists!" << std::endl;
         return 0;
@@ -18,12 +19,12 @@ int init()
     // Try creating the .mgit directory and its subdirectories
     try
     {
-        fs::create_directory(".mgit");
-        fs::create_directories(".mgit/objects");
-        fs::create_directories(".mgit/refs/heads");
+        fs::create_directory(mgit::paths::repository_dir);
+        fs::create_directories(mgit::paths::objects_dir);
+        fs::create_directories(mgit::paths::refs_heads_dir);
 
         // Configure the repository for Git's SHA-256 object format.
-        fs::path config_path = ".mgit/config";
+        const fs::path &config_path = mgit::paths::config_file;
         std::ofstream config_file(config_path);
         config_file << "[core]\n"
                     << "\trepositoryformatversion = 1\n"
@@ -39,8 +40,9 @@ int init()
         }
 
         // Point Git and minigit at the initial branch.
-        std::ofstream head_file(".mgit/HEAD");
-        head_file << "ref: refs/heads/main\n";
+        std::ofstream head_file(mgit::paths::head_file);
+        head_file << "ref: "
+                  << mgit::paths::refs_heads_reference.generic_string() << "/main\n";
         head_file.close();
         if (!head_file)
         {
@@ -49,8 +51,7 @@ int init()
         }
 
         // Keep minigit's staging data separate from Git's native index.
-        fs::path index_path = ".mgit/minigit-index";
-        std::ofstream index_file(index_path);
+        std::ofstream index_file(mgit::paths::index_file);
         index_file.close();
         if (!index_file)
         {
