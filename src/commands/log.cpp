@@ -7,13 +7,12 @@
 
 #include "log.hpp"
 #include "object.hpp"
+#include "repository.hpp"
 
 namespace
 {
     namespace fs = std::filesystem;
     const fs::path mgit_repo = ".mgit";
-    const fs::path branch_path = mgit_repo / "refs/heads" / "main";
-
     struct CommitInfo
     {
         std::string parent;
@@ -69,6 +68,9 @@ bool log()
         std::cerr << "No repository found in this project" << std::endl;
         return false;
     }
+    fs::path branch_path;
+    if (!current_branch_path(branch_path))
+        return false;
     std::ifstream branch(branch_path);
     if (!branch)
     {

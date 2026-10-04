@@ -11,6 +11,7 @@
 
 #include "commit.hpp"
 #include "object.hpp"
+#include "repository.hpp"
 
 namespace
 {
@@ -18,7 +19,7 @@ namespace
     const fs::path mgit_repo = ".mgit";
     const fs::path index_path = mgit_repo / "minigit-index";
     const fs::path config_file_path = mgit_repo / "config";
-    const fs::path branch_path = mgit_repo / "refs" / "heads" / "main";
+    fs::path branch_path;
 
     struct FileEntry
     {
@@ -291,6 +292,9 @@ bool commit(std::string &message)
         std::cerr << "Malformed mgit repo found!" << std::endl;
         return false;
     }
+    // Resolve HEAD so commits update whichever branch is currently checked out.
+    if (!current_branch_path(branch_path))
+        return false;
 
     std::string name;
     std::string email;
@@ -341,6 +345,7 @@ bool commit(std::string &message)
             return false;
         }
     }
+    // Apply staged entries over the parent snapshot to produce the next complete tree.
     for (const auto &[path, entry] : staged_entries)
         snapshot_entries[path] = entry;
 
