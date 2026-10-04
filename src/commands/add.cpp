@@ -187,10 +187,7 @@ namespace
         const auto existing_entry = entries.find(index_key);
         if (existing_entry != entries.end() && existing_entry->second.hash == object_hash &&
             existing_entry->second.mode == mode)
-        {
-            std::cerr << "File is already staged: " << file_path << std::endl;
             return Existing;
-        }
 
         entries[index_key] = {object_hash, mode};
         if (!save_entries(index_path, entries))
@@ -270,13 +267,7 @@ bool add(const std::string &object_name)
         const Status result = add_folder(object);
         if (result == Failure)
             return false;
-        if (result == Existing)
-        {
-            std::cerr << "No new files to stage" << std::endl;
-            return false;
-        }
-
-        std::cout << "Successfully added files to staging" << std::endl;
+        std::cout << (result == Success ? "Successfully added files to staging" : "Already up to date") << std::endl;
         return true;
     }
 
@@ -285,14 +276,11 @@ bool add(const std::string &object_name)
     {
         try
         {
-            if (add_file(object) == Success)
-            {
-                std::cout << "Successfully added the file to staging" << std::endl;
-                return true;
-            }
-
-            else
+            const Status result = add_file(object);
+            if (result == Failure)
                 return false;
+            std::cout << (result == Success ? "Successfully added the file to staging" : "File is already up to date") << std::endl;
+            return true;
         }
         catch (const std::exception &error)
         {

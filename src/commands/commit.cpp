@@ -143,7 +143,8 @@ namespace
     }
 
     Status load_parent_entries(const std::string &commit_hash,
-                               std::unordered_map<std::string, FileEntry> &entries)
+                               std::unordered_map<std::string, FileEntry> &entries,
+                               std::string &tree_hash)
     {
         std::string contents;
         if (!object_store::read_object(commit_hash, "commit", contents))
@@ -151,7 +152,6 @@ namespace
 
         std::istringstream commit(contents);
         std::string line;
-        std::string tree_hash;
         if (!std::getline(commit, line) || line.rfind("tree ", 0) != 0)
             return Status::Malformed;
         tree_hash = line.substr(5);
@@ -319,6 +319,7 @@ bool commit(std::string &message)
 
     std::unordered_map<std::string, FileEntry> snapshot_entries;
     std::string parent;
+    std::string parent_tree_hash;
     if (fs::exists(branch_path))
     {
         std::ifstream branch(branch_path);
@@ -334,7 +335,7 @@ bool commit(std::string &message)
             std::cerr << "Malformed branch file found" << std::endl;
             return false;
         }
-        if (load_parent_entries(parent, snapshot_entries) != Status::Success)
+        if (load_parent_entries(parent, snapshot_entries, parent_tree_hash) != Status::Success)
         {
             std::cerr << "Malformed parent commit found" << std::endl;
             return false;
@@ -358,6 +359,12 @@ bool commit(std::string &message)
     std::string tree_hash;
     if (!build_root_tree(snapshot_entries, tree_hash))
         return false;
+
+    if (!parent.empty() && tree_hash == parent_tree_hash)
+    {
+        std::cerr << "Nothing to commit: staged files are identical to the last commit" << std::endl;
+        return false;
+    }
 
     const std::time_t timestamp = std::time(nullptr);
     std::ostringstream serialized;
