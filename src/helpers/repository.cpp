@@ -5,6 +5,14 @@
 #include <iostream>
 #include <string>
 
+bool is_repository_initialized(const std::string &error_message)
+{
+    const bool initialized = std::filesystem::is_directory(mgit::paths::repository_dir);
+    if (!initialized && !error_message.empty())
+        std::cerr << error_message << std::endl;
+    return initialized;
+}
+
 bool current_branch_path(std::filesystem::path &path)
 {
     std::ifstream head(mgit::paths::head_file);

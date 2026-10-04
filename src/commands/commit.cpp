@@ -243,11 +243,8 @@ namespace
 
 bool commit(std::string &message)
 {
-    if (!fs::exists(mgit::paths::repository_dir))
-    {
-        std::cerr << "No repo initialized for the current project" << std::endl;
+    if (!is_repository_initialized("No repo initialized for the current project"))
         return false;
-    }
     if (trim(message).empty())
     {
         std::cout << "Enter your commit message: " << std::endl;

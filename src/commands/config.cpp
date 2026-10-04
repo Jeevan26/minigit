@@ -4,6 +4,7 @@
 
 #include "config.hpp"
 #include "paths.hpp"
+#include "repository.hpp"
 
 namespace fs = std::filesystem;
 
@@ -59,11 +60,8 @@ bool config(std::string &cfg, std::string &arg)
         return false;
     }
 
-    if (!fs::exists(mgit::paths::repository_dir))
-    {
-        std::cerr << "No repo initialized in current directory!\nTry running \"mgit init\" first" << std::endl;
+    if (!is_repository_initialized("No repo initialized in current directory!\nTry running \"mgit init\" first"))
         return false;
-    }
 
     const fs::path &config_path = mgit::paths::config_file;
     if (!fs::exists(config_path))

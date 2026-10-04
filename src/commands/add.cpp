@@ -6,6 +6,7 @@
 
 #include "object.hpp"
 #include "paths.hpp"
+#include "repository.hpp"
 
 namespace fs = std::filesystem;
 
@@ -248,11 +249,8 @@ bool add(const std::string &object_name)
         return false;
     }
 
-    if (!fs::exists(git_repo))
-    {
-        std::cerr << "No repository found. Try running \"mgit init\" first" << std::endl;
+    if (!is_repository_initialized("No repository found. Try running \"mgit init\" first"))
         return false;
-    }
 
     const fs::path &index_path = mgit::paths::index_file;
     if (!fs::exists(index_path))

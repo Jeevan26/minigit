@@ -63,11 +63,8 @@ namespace
 
 bool log()
 {
-    if (!fs::exists(mgit::paths::repository_dir))
-    {
-        std::cerr << "No repository found in this project" << std::endl;
+    if (!is_repository_initialized("No repository found in this project"))
         return false;
-    }
     std::ifstream head(mgit::paths::head_file);
     std::string head_reference;
     std::string extra_head_line;

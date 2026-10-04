@@ -4,13 +4,14 @@
 
 #include "init.hpp"
 #include "paths.hpp"
+#include "repository.hpp"
 
 namespace fs = std::filesystem;
 
 int init()
 {
 
-    if (fs::is_directory(mgit::paths::repository_dir))
+    if (is_repository_initialized())
     {
         std::cout << "A repository already exists!" << std::endl;
         return 0;
