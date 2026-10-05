@@ -9,7 +9,7 @@ namespace object_store
 {
     struct TreeEntry
     {
-        std::string mode;
+        bool is_directory;
         std::string name;
         std::string hash;
     };

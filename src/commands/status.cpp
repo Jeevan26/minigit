@@ -20,7 +20,6 @@ namespace
     struct FileEntry
     {
         std::string hash;
-        std::string mode;
     };
 
     Status load_index(std::unordered_map<std::string, FileEntry> &entries)
@@ -46,7 +45,7 @@ namespace
             std::string path;
             if (second == std::string::npos)
             {
-                entry = {line.substr(0, first), "100644"};
+                entry = {line.substr(0, first)};
                 path = line.substr(first + 1);
             }
             else if (second == first + 1 || second + 1 == line.size())
@@ -56,11 +55,10 @@ namespace
             }
             else
             {
-                entry = {line.substr(first + 1, second - first - 1), line.substr(0, first)};
+                entry = {line.substr(first + 1, second - first - 1)};
                 path = line.substr(second + 1);
             }
-            if (!object_store::valid_hash(entry.hash) ||
-                (entry.mode != "100644" && entry.mode != "100755") || path.empty())
+            if (!object_store::valid_hash(entry.hash) || path.empty())
             {
                 std::cerr << "Malformed index file" << std::endl;
                 return Status::Failure;
@@ -84,13 +82,13 @@ namespace
         for (const auto &entry : tree)
         {
             const std::string path = prefix.empty() ? entry.name : prefix + "/" + entry.name;
-            if (entry.mode == "40000")
+            if (entry.is_directory)
             {
                 if (flatten_tree(entry.hash, path, entries) != Status::Success)
                     return Status::Failure;
             }
             else
-                entries[path] = {entry.hash, entry.mode};
+                entries[path] = {entry.hash};
         }
         return Status::Success;
     }
@@ -199,10 +197,6 @@ namespace
             std::cerr << "Failed to hash file " << path << ": " << error.what() << std::endl;
             return Status::Failure;
         }
-        const auto permissions = fs::status(path).permissions();
-        const bool executable = (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
-                                                 fs::perms::others_exec)) != fs::perms::none;
-        entry.mode = executable ? "100755" : "100644";
         return Status::Success;
     }
 
@@ -295,7 +289,7 @@ Status status_command()
         const auto previous = committed.find(path);
         if (previous == committed.end())
             staged_changes[path] = "new file";
-        else if (previous->second.hash != entry.hash || previous->second.mode != entry.mode)
+        else if (previous->second.hash != entry.hash)
             staged_changes[path] = "modified";
     }
 
@@ -305,7 +299,7 @@ Status status_command()
         const auto current = working.find(path);
         if (current == working.end())
             unstaged_changes[path] = "deleted";
-        else if (current->second.hash != entry.hash || current->second.mode != entry.mode)
+        else if (current->second.hash != entry.hash)
             unstaged_changes[path] = "modified";
     }
 

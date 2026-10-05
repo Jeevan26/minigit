@@ -24,14 +24,12 @@ namespace
     struct FileEntry
     {
         std::string hash;
-        std::string mode;
     };
 
     struct TreeNode
     {
         std::map<std::string, TreeNode> children;
         std::string hash;
-        std::string mode;
         bool is_file = false;
     };
 
@@ -107,13 +105,12 @@ namespace
                 return LoadStatus::Malformed;
             const auto second = line.find('\t', first + 1);
             if (second == std::string::npos)
-                entries[line.substr(first + 1)] = {line.substr(0, first), "100644"};
+                entries[line.substr(first + 1)] = {line.substr(0, first)};
             else if (second == first + 1 || second + 1 == line.size())
                 return LoadStatus::Malformed;
             else
                 entries[line.substr(second + 1)] = {
-                    line.substr(first + 1, second - first - 1),
-                    line.substr(0, first)};
+                    line.substr(first + 1, second - first - 1)};
         }
         if (index.bad())
         {
@@ -132,20 +129,19 @@ namespace
         for (const auto &entry : tree)
         {
             const std::string path = prefix.empty() ? entry.name : prefix + "/" + entry.name;
-            if (entry.mode == "40000")
+            if (entry.is_directory)
             {
                 if (flatten_tree(entry.hash, path, entries) != Status::Success)
                     return Status::Failure;
             }
             else
-                entries[path] = {entry.hash, entry.mode};
+                entries[path] = {entry.hash};
         }
         return Status::Success;
     }
 
     LoadStatus load_parent_entries(const std::string &commit_hash,
-                               std::unordered_map<std::string, FileEntry> &entries,
-                               std::string &tree_hash)
+                                   std::unordered_map<std::string, FileEntry> &entries)
     {
         std::string contents;
         if (object_store::read_object(commit_hash, "commit", contents) != Status::Success)
@@ -155,7 +151,7 @@ namespace
         std::string line;
         if (!std::getline(commit, line) || line.rfind("tree ", 0) != 0)
             return LoadStatus::Malformed;
-        tree_hash = line.substr(5);
+        const std::string tree_hash = line.substr(5);
         if (!object_store::valid_hash(tree_hash) || flatten_tree(tree_hash, "", entries) != Status::Success)
             return LoadStatus::Malformed;
         return LoadStatus::Success;
@@ -170,19 +166,19 @@ namespace
                 return Status::Failure;
 
             if (child.is_file)
-                entries.push_back({child.mode, name, child.hash});
+                entries.push_back({false, name, child.hash});
             else
             {
                 std::string child_hash;
                 if (make_tree(child, child_hash) != Status::Success)
                     return Status::Failure;
-                entries.push_back({"40000", name, child_hash});
+                entries.push_back({true, name, child_hash});
             }
         }
         std::sort(entries.begin(), entries.end(), [](const auto &left, const auto &right)
                   {
-                      const std::string left_name = left.name + (left.mode == "40000" ? "/" : "");
-                      const std::string right_name = right.name + (right.mode == "40000" ? "/" : "");
+                      const std::string left_name = left.name + (left.is_directory ? "/" : "");
+                      const std::string right_name = right.name + (right.is_directory ? "/" : "");
                       return left_name < right_name;
                   });
         return object_store::write_tree(entries, tree_hash);
@@ -197,8 +193,7 @@ namespace
             const fs::path file_path(path);
             if (path.empty() || file_path.is_absolute() ||
                 path.find('\n') != std::string::npos || path.find('\0') != std::string::npos ||
-                !object_store::valid_hash(entry.hash) ||
-                (entry.mode != "100644" && entry.mode != "100755"))
+                !object_store::valid_hash(entry.hash))
             {
                 std::cerr << "Invalid path or object in snapshot: " << path << std::endl;
                 return Status::Failure;
@@ -226,7 +221,6 @@ namespace
                     }
                     current->is_file = true;
                     current->hash = entry.hash;
-                    current->mode = entry.mode;
                     break;
                 }
                 if (current->is_file)
@@ -238,6 +232,20 @@ namespace
             }
         }
         return make_tree(root, tree_hash);
+    }
+
+    bool same_file_contents(const std::unordered_map<std::string, FileEntry> &left,
+                            const std::unordered_map<std::string, FileEntry> &right)
+    {
+        if (left.size() != right.size())
+            return false;
+        for (const auto &[path, entry] : left)
+        {
+            const auto other = right.find(path);
+            if (other == right.end() || entry.hash != other->second.hash)
+                return false;
+        }
+        return true;
     }
 
 }
@@ -311,9 +319,8 @@ Status commit(std::string &message)
         return Status::Failure;
     }
 
-    std::unordered_map<std::string, FileEntry> snapshot_entries;
+    std::unordered_map<std::string, FileEntry> parent_entries;
     std::string parent;
-    std::string parent_tree_hash;
     if (detached_head || fs::exists(branch_path))
     {
         std::ifstream branch(branch_path);
@@ -329,12 +336,13 @@ Status commit(std::string &message)
             std::cerr << "Malformed branch file found" << std::endl;
             return Status::Failure;
         }
-        if (load_parent_entries(parent, snapshot_entries, parent_tree_hash) != LoadStatus::Success)
+        if (load_parent_entries(parent, parent_entries) != LoadStatus::Success)
         {
             std::cerr << "Malformed parent commit found" << std::endl;
             return Status::Failure;
         }
     }
+    std::unordered_map<std::string, FileEntry> snapshot_entries = parent_entries;
     // Apply staged entries over the parent snapshot to produce the next complete tree.
     for (const auto &[path, entry] : staged_entries)
         snapshot_entries[path] = entry;
@@ -343,7 +351,6 @@ Status commit(std::string &message)
     {
         std::string blob;
         if (!object_store::valid_hash(entry.hash) ||
-            (entry.mode != "100644" && entry.mode != "100755") ||
             object_store::read_object(entry.hash, "blob", blob) != Status::Success)
         {
             std::cerr << "Invalid or missing blob for staged path: " << path << std::endl;
@@ -355,7 +362,7 @@ Status commit(std::string &message)
     if (build_root_tree(snapshot_entries, tree_hash) != Status::Success)
         return Status::Failure;
 
-    if (!parent.empty() && tree_hash == parent_tree_hash)
+    if (!parent.empty() && same_file_contents(snapshot_entries, parent_entries))
     {
         std::cerr << "Nothing to commit: staged files are identical to the last commit" << std::endl;
         return Status::Failure;

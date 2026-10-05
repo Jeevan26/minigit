@@ -30,7 +30,6 @@ Status init()
         std::ofstream config_file(config_path);
         config_file << "[core]\n"
                     << "\trepositoryformatversion = 1\n"
-                    << "\tfilemode = true\n"
                     << "\tbare = false\n"
                     << "[extensions]\n"
                     << "\tobjectFormat = sha256\n";

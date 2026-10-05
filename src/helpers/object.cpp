@@ -181,18 +181,20 @@ namespace object_store
 
     Status write_tree(const std::vector<TreeEntry> &entries, std::string &tree_hash)
     {
-        std::string contents;
+        std::string contents = "MGTR";
+        contents.push_back('\1');
         for (const auto &entry : entries)
         {
             std::string raw_hash;
-            if ((entry.mode != "100644" && entry.mode != "100755" && entry.mode != "40000") ||
-                entry.name.empty() || entry.name.find('/') != std::string::npos ||
+            if (entry.name.empty() || entry.name == "." || entry.name == ".." ||
+                entry.name.find('/') != std::string::npos ||
                 entry.name.find('\0') != std::string::npos || decode_hash(entry.hash, raw_hash) != Status::Success)
             {
-                std::cerr << "Invalid Git tree entry" << std::endl;
+                std::cerr << "Invalid tree entry" << std::endl;
                 return Status::Failure;
             }
-            contents += entry.mode + " " + entry.name + '\0' + raw_hash;
+            contents.push_back(entry.is_directory ? 'D' : 'F');
+            contents += entry.name + '\0' + raw_hash;
         }
         return write_object("tree", contents, tree_hash);
     }
@@ -204,26 +206,32 @@ namespace object_store
             return Status::Failure;
 
         entries.clear();
-        std::size_t offset = 0;
+        if (contents.size() < 5 || contents.compare(0, 4, "MGTR") != 0 || contents[4] != '\1')
+        {
+            std::cerr << "Unsupported tree object format" << std::endl;
+            return Status::Failure;
+        }
+
+        std::size_t offset = 5;
         while (offset < contents.size())
         {
-            const auto space = contents.find(' ', offset);
-            const auto nul = space == std::string::npos ? std::string::npos : contents.find('\0', space + 1);
-            if (space == std::string::npos || nul == std::string::npos ||
+            const char kind = contents[offset];
+            const auto nul = contents.find('\0', offset + 1);
+            if ((kind != 'F' && kind != 'D') || nul == std::string::npos ||
                 contents.size() - nul - 1 < hash_bytes)
             {
-                std::cerr << "Malformed Git tree object" << std::endl;
+                std::cerr << "Malformed tree object" << std::endl;
                 return Status::Failure;
             }
 
             TreeEntry entry;
-            entry.mode = contents.substr(offset, space - offset);
-            entry.name = contents.substr(space + 1, nul - space - 1);
+            entry.is_directory = kind == 'D';
+            entry.name = contents.substr(offset + 1, nul - offset - 1);
             entry.hash = encode_hash(contents.substr(nul + 1, hash_bytes));
             if (entry.name.empty() || entry.name == "." || entry.name == ".." ||
-                (entry.mode != "100644" && entry.mode != "100755" && entry.mode != "40000"))
+                entry.name.find('/') != std::string::npos)
             {
-                std::cerr << "Malformed Git tree entry" << std::endl;
+                std::cerr << "Malformed tree entry" << std::endl;
                 return Status::Failure;
             }
             entries.push_back(std::move(entry));

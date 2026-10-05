@@ -16,7 +16,6 @@ namespace
     struct IndexEntry
     {
         std::string hash;
-        std::string mode;
     };
 
     /// Checks if a child is within a given parent
@@ -55,7 +54,7 @@ namespace
 
                 const auto second_separator = line.find('\t', first_separator + 1);
                 if (second_separator == std::string::npos)
-                    entries[line.substr(first_separator + 1)] = {line.substr(0, first_separator), "100644"};
+                    entries[line.substr(first_separator + 1)] = {line.substr(0, first_separator)};
                 else if (second_separator == first_separator + 1 || second_separator + 1 == line.size())
                 {
                     std::cerr << "Invalid index entry" << std::endl;
@@ -63,8 +62,7 @@ namespace
                 }
                 else
                     entries[line.substr(second_separator + 1)] = {
-                        line.substr(first_separator + 1, second_separator - first_separator - 1),
-                        line.substr(0, first_separator)};
+                        line.substr(first_separator + 1, second_separator - first_separator - 1)};
             }
 
             if (index.bad())
@@ -94,7 +92,7 @@ namespace
         }
 
         for (const auto &[file_path, entry] : entries)
-            index << entry.mode << '\t' << entry.hash << '\t' << file_path << '\n';
+            index << entry.hash << '\t' << file_path << '\n';
 
         if (!index)
         {
@@ -169,10 +167,6 @@ namespace
         const std::string index_key = file_path.lexically_normal().generic_string();
         std::unordered_map<std::string, IndexEntry> entries;
 
-        const auto permissions = fs::status(file_path).permissions();
-        const bool executable = (permissions & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) != fs::perms::none;
-        const std::string mode = executable ? "100755" : "100644";
-
         if (load_entries(mgit::paths::index_file, entries) != Status::Success)
         {
             std::cerr << "An error occured whilst trying to fetch index entries" << std::endl;
@@ -180,11 +174,10 @@ namespace
         }
 
         const auto existing_entry = entries.find(index_key);
-        if (existing_entry != entries.end() && existing_entry->second.hash == object_hash &&
-            existing_entry->second.mode == mode)
+        if (existing_entry != entries.end() && existing_entry->second.hash == object_hash)
             return Status::Existing;
 
-        entries[index_key] = {object_hash, mode};
+        entries[index_key] = {object_hash};
         if (save_entries(mgit::paths::index_file, entries) != Status::Success)
             return Status::Failure;
 
