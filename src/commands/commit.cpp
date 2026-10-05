@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -369,12 +371,18 @@ Status commit(std::string &message)
     }
 
     const std::time_t timestamp = std::time(nullptr);
+    std::tm local_time{};
+    localtime_r(&timestamp, &local_time);
+    const long offset_minutes = local_time.tm_gmtoff / 60;
+    char zone[8];
+    std::snprintf(zone, sizeof(zone), "%c%02ld%02ld", offset_minutes < 0 ? '-' : '+',
+                  std::labs(offset_minutes) / 60, std::labs(offset_minutes) % 60);
     std::ostringstream serialized;
     serialized << "tree " << tree_hash << '\n';
     if (!parent.empty())
         serialized << "parent " << parent << '\n';
-    serialized << "author " << name << " <" << email << "> " << timestamp << " +0000\n";
-    serialized << "committer " << name << " <" << email << "> " << timestamp << " +0000\n\n";
+    serialized << "author " << name << " <" << email << "> " << timestamp << ' ' << zone << '\n';
+    serialized << "committer " << name << " <" << email << "> " << timestamp << ' ' << zone << "\n\n";
     serialized << message;
     if (message.empty() || message.back() != '\n')
         serialized << '\n';

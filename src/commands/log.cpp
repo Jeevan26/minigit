@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -14,6 +16,25 @@
 namespace
 {
     namespace fs = std::filesystem;
+
+    // Converts "<epoch> <+hhmm>" into a readable date in the commit's own timezone.
+    std::string format_date(const std::string &raw)
+    {
+        std::istringstream in(raw);
+        long long epoch = 0;
+        std::string zone;
+        if (!(in >> epoch >> zone) || zone.size() != 5 || (zone[0] != '+' && zone[0] != '-'))
+            return raw;
+        const long offset = (std::strtol(zone.substr(1, 2).c_str(), nullptr, 10) * 3600 +
+                             std::strtol(zone.substr(3, 2).c_str(), nullptr, 10) * 60) *
+                            (zone[0] == '-' ? -1 : 1);
+        const std::time_t shifted = static_cast<std::time_t>(epoch + offset);
+        std::tm tm{};
+        gmtime_r(&shifted, &tm);
+        char buffer[64];
+        std::strftime(buffer, sizeof(buffer), "%a %b %e %H:%M:%S %Y", &tm);
+        return std::string(buffer) + " " + zone;
+    }
     struct CommitInfo
     {
         std::string parent;
@@ -122,8 +143,8 @@ Status log()
         }
 
         std::cout << "commit " << commit_hash << '\n'
-                  << "Author: " << commit.author << '\n'
-                  << "Date:   " << commit.date << "\n\n";
+                  << "Author: " << commit.author.substr(0, commit.author.rfind('>') + 1) << '\n'
+                  << "Date:   " << format_date(commit.date) << "\n\n";
         std::istringstream message(commit.message);
         std::string line;
         while (std::getline(message, line))
