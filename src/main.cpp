@@ -9,8 +9,9 @@
 #include "headers/config.hpp"
 #include "headers/destory.hpp"
 #include "headers/log.hpp"
+#include "headers/status_command.hpp"
 
-inline int status(bool boolean) { return !boolean; }
+inline int status(Status result) { return result == Status::Failure; }
 
 int main(int argc, char *argv[])
 {
@@ -24,7 +25,7 @@ int main(int argc, char *argv[])
 
     if (command == "init")
     {
-        return init();
+        return status(init());
     }
     else if (command == "add")
     {
@@ -49,6 +50,10 @@ int main(int argc, char *argv[])
     else if (command == "log")
     {
         return status(log());
+    }
+    else if (command == "status")
+    {
+        return status(status_command());
     }
     else
     {
