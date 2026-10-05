@@ -215,7 +215,7 @@ namespace
         {
             for (fs::recursive_directory_iterator it(fs::current_path()), end; it != end; ++it)
             {
-                if (is_repository_path(it->path()))
+                if (is_repository_path(it->path()) || it->path().filename() == ".git")
                 {
                     it.disable_recursion_pending();
                     continue;
